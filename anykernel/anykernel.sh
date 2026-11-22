@@ -22,10 +22,14 @@ supported.patchlevels=
 '; } # end properties
 
 ### AnyKernel install
-BLOCK=boot;
+BLOCK=/dev/block/bootdevice/by-name/boot;
+block=/dev/block/bootdevice/by-name/boot;
 IS_SLOT_DEVICE=auto;
+is_slot_device=auto;
 RAMDISK_COMPRESSION=auto;
+ramdisk_compression=auto;
 PATCH_VBMETA_FLAG=auto;
+patch_vbmeta_flag=auto;
 
 . tools/ak3-core.sh;
 
@@ -111,30 +115,32 @@ if [ -f "$AKHOME/kernels/aosp/Image" ] && [ -f "$AKHOME/kernels/stock/Image" ]; 
         done;
     fi;
 
-    # Apply selected kernel Image and DTB
+    # Apply selected kernel Image (DO NOT touch DTB or DTBO to preserve ROM panel/touch calibration)
     if [ "$CHOSEN_VARIANT" = "stock" ]; then
         ui_print "  -> Flashing Stock Kernel (MIUI / HyperOS)...";
         cp -f "$AKHOME/kernels/stock/Image" "$AKHOME/Image";
-        [ -f "$AKHOME/kernels/stock/dtb" ] && cp -f "$AKHOME/kernels/stock/dtb" "$AKHOME/dtb";
     else
         ui_print "  -> Flashing AOSP Kernel (Custom ROMs)...";
         cp -f "$AKHOME/kernels/aosp/Image" "$AKHOME/Image";
-        [ -f "$AKHOME/kernels/aosp/dtb" ] && cp -f "$AKHOME/kernels/aosp/dtb" "$AKHOME/dtb";
     fi;
 elif [ -f "$AKHOME/kernels/stock/Image" ]; then
     ui_print "  -> Target: Stock MIUI / HyperOS";
     cp -f "$AKHOME/kernels/stock/Image" "$AKHOME/Image";
-    [ -f "$AKHOME/kernels/stock/dtb" ] && cp -f "$AKHOME/kernels/stock/dtb" "$AKHOME/dtb";
 elif [ -f "$AKHOME/kernels/aosp/Image" ]; then
     ui_print "  -> Target: AOSP / Custom ROM";
     cp -f "$AKHOME/kernels/aosp/Image" "$AKHOME/Image";
-    [ -f "$AKHOME/kernels/aosp/dtb" ] && cp -f "$AKHOME/kernels/aosp/dtb" "$AKHOME/dtb";
 fi;
 
+# DO NOT touch DTB or DTBO (preserve panel, touchscreen, and display calibration from ROM)
+rm -f "$AKHOME/dtb" "$AKHOME/dtbo.img" "$AKHOME/dtbo" 2>/dev/null;
+
+# Verify that target Image exists before proceeding
+[ -f "$AKHOME/Image" ] || abort "  ! Kernel Image not found in $AKHOME";
+
 ui_print " ";
-ui_print "  -> Unpacking and flashing boot partition...";
-dump_boot;
-write_boot;
+ui_print "  -> Splitting and flashing kernel to boot partition...";
+split_boot;
+flash_boot;
 
 ui_print " ";
 ui_print "  ===========================================";

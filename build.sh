@@ -95,7 +95,7 @@ build_kernel() {
     make O="${out_sub}" "${MAKE_FLAGS[@]}" olddefconfig
 
     echo ">>> Compiling Kernel [${variant}]..."
-    make -j$(nproc --all) O="${out_sub}" "${MAKE_FLAGS[@]}" Image dtbs
+    make -j$(nproc --all) O="${out_sub}" "${MAKE_FLAGS[@]}" Image
 
     if [ ! -f "${out_sub}/arch/arm64/boot/Image" ]; then
         echo "ERROR: Kernel compilation failed for ${variant}!"
@@ -129,33 +129,19 @@ else
     rm -rf "${AK3_DIR}_repo"
 fi
 
-# Find DTB
-DTB_FILE=""
-if [ -f "${OUT_DIR}/aosp/arch/arm64/boot/dtb.img" ]; then
-    DTB_FILE="${OUT_DIR}/aosp/arch/arm64/boot/dtb.img"
-elif [ -f "${OUT_DIR}/aosp/arch/arm64/boot/dts/vendor/qcom/kona-v2.1.dtb" ]; then
-    DTB_FILE="${OUT_DIR}/aosp/arch/arm64/boot/dts/vendor/qcom/kona-v2.1.dtb"
-elif [ -f "${OUT_DIR}/aosp/arch/arm64/boot/dts/vendor/qcom/munch.dtb" ]; then
-    DTB_FILE="${OUT_DIR}/aosp/arch/arm64/boot/dts/vendor/qcom/munch.dtb"
-elif [ -f "${OUT_DIR}/stock/arch/arm64/boot/dts/vendor/qcom/kona-v2.1.dtb" ]; then
-    DTB_FILE="${OUT_DIR}/stock/arch/arm64/boot/dts/vendor/qcom/kona-v2.1.dtb"
-elif [ -f "${OUT_DIR}/stock/arch/arm64/boot/dts/vendor/qcom/munch.dtb" ]; then
-    DTB_FILE="${OUT_DIR}/stock/arch/arm64/boot/dts/vendor/qcom/munch.dtb"
-fi
-
-# Stage kernel images
+# Stage kernel images (DO NOT include dtb/dtbo to preserve ROM panel and touch calibration)
 if [ -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" ]; then
     cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/kernels/aosp/Image"
     cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/Image" # Default
-    [ -n "$DTB_FILE" ] && cp -f "$DTB_FILE" "${AK3_DIR}/kernels/aosp/dtb"
 fi
 
 if [ -f "${OUT_DIR}/stock/arch/arm64/boot/Image" ]; then
     cp -f "${OUT_DIR}/stock/arch/arm64/boot/Image" "${AK3_DIR}/kernels/stock/Image"
-    [ -n "$DTB_FILE" ] && cp -f "$DTB_FILE" "${AK3_DIR}/kernels/stock/dtb"
 fi
 
-[ -n "$DTB_FILE" ] && cp -f "$DTB_FILE" "${AK3_DIR}/dtb"
+# Clean any stale dtb or dtbo from AK3 template
+rm -f "${AK3_DIR}/dtb" "${AK3_DIR}/dtbo" "${AK3_DIR}/dtbo.img"
+rm -f "${AK3_DIR}/kernels/aosp/dtb" "${AK3_DIR}/kernels/stock/dtb" 2>/dev/null || true
 
 # Ensure anykernel.sh is present and executable
 if [ -f "${ROOT_DIR}/anykernel/anykernel.sh" ]; then

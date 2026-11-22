@@ -712,7 +712,7 @@ static void binder_free_buf_locked(struct binder_alloc *alloc,
 	binder_insert_free_buffer(alloc, buffer);
 }
 
-static void binder_alloc_clear_buf(struct binder_alloc *alloc,
+void binder_alloc_clear_buf(struct binder_alloc *alloc,
 				   struct binder_buffer *buffer);
 /**
  * binder_alloc_free_buf() - free a binder buffer
@@ -1179,7 +1179,7 @@ static struct page *binder_alloc_get_page(struct binder_alloc *alloc,
  *
  * memset the given buffer to 0
  */
-static void binder_alloc_clear_buf(struct binder_alloc *alloc,
+void binder_alloc_clear_buf(struct binder_alloc *alloc,
 				   struct binder_buffer *buffer)
 {
 	size_t bytes = binder_alloc_buffer_size(alloc, buffer);
