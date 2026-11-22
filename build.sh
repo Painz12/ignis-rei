@@ -58,6 +58,22 @@ echo "================================================="
 # Clean stale root artifacts
 rm -f include/config/auto.conf .config
 
+MAKE_FLAGS=(
+    ARCH=arm64
+    CC=clang
+    LD=ld.lld
+    AR=llvm-ar
+    NM=llvm-nm
+    OBJCOPY=llvm-objcopy
+    OBJDUMP=llvm-objdump
+    STRIP=llvm-strip
+    HOSTCC=gcc
+    HOSTCXX=g++
+    CLANG_TRIPLE=aarch64-linux-gnu-
+    CROSS_COMPILE=aarch64-linux-gnu-
+    CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+)
+
 build_kernel() {
     local variant="$1" # aosp or stock
     local out_sub="${OUT_DIR}/${variant}"
@@ -76,24 +92,10 @@ build_kernel() {
             arch/arm64/configs/vendor/xiaomi/sm8250-common.config \
             arch/arm64/configs/vendor/xiaomi/munch.config
     fi
-    make O="${out_sub}" ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm HOSTCC=gcc HOSTCXX=g++ olddefconfig
+    make O="${out_sub}" "${MAKE_FLAGS[@]}" olddefconfig
 
     echo ">>> Compiling Kernel [${variant}]..."
-    make -j$(nproc --all) O="${out_sub}" \
-        ARCH=arm64 \
-        CC=clang \
-        LD=ld.lld \
-        AR=llvm-ar \
-        NM=llvm-nm \
-        OBJCOPY=llvm-objcopy \
-        OBJDUMP=llvm-objdump \
-        STRIP=llvm-strip \
-        HOSTCC=gcc \
-        HOSTCXX=g++ \
-        CLANG_TRIPLE=aarch64-linux-gnu- \
-        CROSS_COMPILE=aarch64-linux-gnu- \
-        CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-        Image dtbs
+    make -j$(nproc --all) O="${out_sub}" "${MAKE_FLAGS[@]}" Image dtbs
 
     if [ ! -f "${out_sub}/arch/arm64/boot/Image" ]; then
         echo "ERROR: Kernel compilation failed for ${variant}!"
@@ -131,8 +133,12 @@ fi
 DTB_FILE=""
 if [ -f "${OUT_DIR}/aosp/arch/arm64/boot/dtb.img" ]; then
     DTB_FILE="${OUT_DIR}/aosp/arch/arm64/boot/dtb.img"
+elif [ -f "${OUT_DIR}/aosp/arch/arm64/boot/dts/vendor/qcom/kona-v2.1.dtb" ]; then
+    DTB_FILE="${OUT_DIR}/aosp/arch/arm64/boot/dts/vendor/qcom/kona-v2.1.dtb"
 elif [ -f "${OUT_DIR}/aosp/arch/arm64/boot/dts/vendor/qcom/munch.dtb" ]; then
     DTB_FILE="${OUT_DIR}/aosp/arch/arm64/boot/dts/vendor/qcom/munch.dtb"
+elif [ -f "${OUT_DIR}/stock/arch/arm64/boot/dts/vendor/qcom/kona-v2.1.dtb" ]; then
+    DTB_FILE="${OUT_DIR}/stock/arch/arm64/boot/dts/vendor/qcom/kona-v2.1.dtb"
 elif [ -f "${OUT_DIR}/stock/arch/arm64/boot/dts/vendor/qcom/munch.dtb" ]; then
     DTB_FILE="${OUT_DIR}/stock/arch/arm64/boot/dts/vendor/qcom/munch.dtb"
 fi
