@@ -22,13 +22,11 @@ supported.patchlevels=
 '; } # end properties
 
 ### AnyKernel install
-BLOCK=/dev/block/bootdevice/by-name/boot;
+devicename=munch;
+devicename2=munchin;
+is_slot_device=1;
 block=/dev/block/bootdevice/by-name/boot;
-IS_SLOT_DEVICE=auto;
-is_slot_device=auto;
-RAMDISK_COMPRESSION=auto;
 ramdisk_compression=auto;
-PATCH_VBMETA_FLAG=auto;
 patch_vbmeta_flag=auto;
 
 . tools/ak3-core.sh;
@@ -131,16 +129,22 @@ elif [ -f "$AKHOME/kernels/aosp/Image" ]; then
     cp -f "$AKHOME/kernels/aosp/Image" "$AKHOME/Image";
 fi;
 
-# DO NOT touch DTB or DTBO (preserve panel, touchscreen, and display calibration from ROM)
-rm -f "$AKHOME/dtb" "$AKHOME/dtbo.img" "$AKHOME/dtbo" 2>/dev/null;
-
 # Verify that target Image exists before proceeding
 [ -f "$AKHOME/Image" ] || abort "  ! Kernel Image not found in $AKHOME";
 
 ui_print " ";
-ui_print "  -> Splitting and flashing kernel to boot partition...";
-split_boot;
-flash_boot;
+ui_print "  -> Flashing kernel to boot partition and dtbo overlay...";
+dump_boot;
+write_boot;
+
+# Flash hardware DTB to vendor_boot partition on A/B slot devices
+if [ -f "$AKHOME/dtb" ]; then
+    ui_print "  -> Flashing hardware DTB to vendor_boot partition...";
+    block=/dev/block/bootdevice/by-name/vendor_boot;
+    reset_ak;
+    dump_boot;
+    write_boot;
+fi;
 
 ui_print " ";
 ui_print "  ===========================================";

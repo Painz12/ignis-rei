@@ -129,19 +129,31 @@ else
     rm -rf "${AK3_DIR}_repo"
 fi
 
-# Stage kernel images (DO NOT include dtb/dtbo to preserve ROM panel and touch calibration)
-if [ -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" ]; then
-    cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/kernels/aosp/Image"
-    cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/Image" # Default
+# Stage kernel images
+if [ "$BUILD_VARIANT" = "aosp" ]; then
+    rm -rf "${AK3_DIR}/kernels"
+    cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/Image"
+elif [ "$BUILD_VARIANT" = "stock" ]; then
+    rm -rf "${AK3_DIR}/kernels"
+    cp -f "${OUT_DIR}/stock/arch/arm64/boot/Image" "${AK3_DIR}/Image"
+else
+    mkdir -p "${AK3_DIR}/kernels/aosp" "${AK3_DIR}/kernels/stock"
+    if [ -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" ]; then
+        cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/kernels/aosp/Image"
+        cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/Image"
+    fi
+    if [ -f "${OUT_DIR}/stock/arch/arm64/boot/Image" ]; then
+        cp -f "${OUT_DIR}/stock/arch/arm64/boot/Image" "${AK3_DIR}/kernels/stock/Image"
+    fi
 fi
 
-if [ -f "${OUT_DIR}/stock/arch/arm64/boot/Image" ]; then
-    cp -f "${OUT_DIR}/stock/arch/arm64/boot/Image" "${AK3_DIR}/kernels/stock/Image"
+# Ensure hardware DTB and DTBO are included for vendor_boot and dtbo flashing
+if [ -f "${ROOT_DIR}/anykernel/dtb" ]; then
+    cp -f "${ROOT_DIR}/anykernel/dtb" "${AK3_DIR}/dtb"
 fi
-
-# Clean any stale dtb or dtbo from AK3 template
-rm -f "${AK3_DIR}/dtb" "${AK3_DIR}/dtbo" "${AK3_DIR}/dtbo.img"
-rm -f "${AK3_DIR}/kernels/aosp/dtb" "${AK3_DIR}/kernels/stock/dtb" 2>/dev/null || true
+if [ -f "${ROOT_DIR}/anykernel/dtbo.img" ]; then
+    cp -f "${ROOT_DIR}/anykernel/dtbo.img" "${AK3_DIR}/dtbo.img"
+fi
 
 # Ensure anykernel.sh is present and executable
 if [ -f "${ROOT_DIR}/anykernel/anykernel.sh" ]; then
