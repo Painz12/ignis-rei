@@ -171,6 +171,7 @@ const struct bpf_verifier_ops struct_ops_verifier_ops = {
 const struct bpf_prog_ops struct_ops_prog_ops = {
 };
 
+#ifndef CONFIG_BPF_LSM
 /* LSM programs */
 const struct bpf_verifier_ops lsm_verifier_ops = {
 	.get_func_proto  = tp_stub_func_proto,
@@ -179,6 +180,7 @@ const struct bpf_verifier_ops lsm_verifier_ops = {
 
 const struct bpf_prog_ops lsm_prog_ops = {
 };
+#endif
 
 /* CGROUP_SOCKOPT programs */
 const struct bpf_verifier_ops cgroup_sockopt_verifier_ops = {
