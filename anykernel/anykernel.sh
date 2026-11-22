@@ -22,11 +22,13 @@ supported.patchlevels=
 '; } # end properties
 
 ### AnyKernel install
-devicename=munch;
-devicename2=munchin;
-is_slot_device=1;
-block=/dev/block/bootdevice/by-name/boot;
+BLOCK=boot;
+block=boot;
+IS_SLOT_DEVICE=auto;
+is_slot_device=auto;
+RAMDISK_COMPRESSION=auto;
 ramdisk_compression=auto;
+PATCH_VBMETA_FLAG=auto;
 patch_vbmeta_flag=auto;
 
 . tools/ak3-core.sh;
@@ -130,20 +132,28 @@ elif [ -f "$AKHOME/kernels/aosp/Image" ]; then
 fi;
 
 # Verify that target Image exists before proceeding
-[ -f "$AKHOME/Image" ] || abort "  ! Kernel Image not found in $AKHOME";
+[ -f "$AKHOME/Image" -o -f "$AKHOME/boot-files/Image" ] || abort "  ! Kernel Image not found in $AKHOME";
+[ -f "$AKHOME/Image" ] || cp -af "$AKHOME/boot-files/Image" "$AKHOME/Image";
 
 ui_print " ";
-ui_print "  -> Flashing kernel to boot partition and dtbo overlay...";
-dump_boot;
-write_boot;
+ui_print "  -> Flashing kernel to boot partition...";
+split_boot;
+flash_boot;
+
+# Flash DTBO overlay if present
+if [ -f "$AKHOME/dtbo.img" -o -f "$AKHOME/dtbo" ]; then
+    ui_print "  -> Flashing hardware DTBO overlay...";
+    flash_generic dtbo;
+fi;
 
 # Flash hardware DTB to vendor_boot partition on A/B slot devices
-if [ -f "$AKHOME/dtb" ]; then
+if [ -f "$AKHOME/dtb" -o -f "$AKHOME/vendor_boot-files/dtb" ]; then
     ui_print "  -> Flashing hardware DTB to vendor_boot partition...";
-    block=/dev/block/bootdevice/by-name/vendor_boot;
+    BLOCK=vendor_boot;
+    block=vendor_boot;
     reset_ak;
-    dump_boot;
-    write_boot;
+    split_boot;
+    flash_boot;
 fi;
 
 ui_print " ";
