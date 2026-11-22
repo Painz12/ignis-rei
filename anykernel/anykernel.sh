@@ -22,19 +22,21 @@ supported.patchlevels=
 '; } # end properties
 
 ### AnyKernel install
+# Modern AnyKernel3 uses UPPERCASE vars.
+# setup_ak() (called at end of ak3-core.sh) auto-detects vendor_boot$SLOT and:
+#   - Moves Image* -> boot-files/,  dtb -> vendor_boot-files/
+#   - On dump_boot/write_boot it handles both partitions automatically.
+# We must NOT manually call reset_ak+split_boot+flash_boot for vendor_boot;
+# that conflicts with the auto-setup and causes dtb/Image to disappear.
 BLOCK=boot;
-block=boot;
 IS_SLOT_DEVICE=auto;
-is_slot_device=auto;
 RAMDISK_COMPRESSION=auto;
-ramdisk_compression=auto;
 PATCH_VBMETA_FLAG=auto;
-patch_vbmeta_flag=auto;
 
 . tools/ak3-core.sh;
 
-AKHOME="${AKHOME:-${home:-$PWD}}";
-home="$AKHOME";
+# After ak3-core.sh sourced, $AKHOME is set by setup_ak.
+AKHOME="${AKHOME:-$PWD}";
 
 ui_print " ";
 ui_print "  ===========================================";
@@ -43,71 +45,58 @@ ui_print "  |          Android 11 - 17 Ready          |";
 ui_print "  ===========================================";
 ui_print " ";
 
-# Check if dual images are available
+# If a dual-image zip is present, pick the right Image variant.
 if [ -f "$AKHOME/kernels/aosp/Image" ] && [ -f "$AKHOME/kernels/stock/Image" ]; then
     CHOSEN_VARIANT="";
 
-    # 1. Check for manual override flags
+    # 1. Manual override flags
     if [ -f /tmp/aosp ] || [ -f /sdcard/aosp ] || [ -f /data/aosp ]; then
         CHOSEN_VARIANT="aosp";
-        ui_print "  -> [Override Flag] AOSP selected.";
+        ui_print "  -> [Override] AOSP selected.";
     elif [ -f /tmp/stock ] || [ -f /sdcard/stock ] || [ -f /data/stock ] || \
          [ -f /tmp/miui ] || [ -f /sdcard/miui ] || [ -f /tmp/hyperos ] || [ -f /sdcard/hyperos ]; then
         CHOSEN_VARIANT="stock";
-        ui_print "  -> [Override Flag] Stock selected.";
+        ui_print "  -> [Override] Stock selected.";
     fi;
 
-    # 2. If booted in Android (e.g. KernelSU / FK Manager), auto-detect via getprop
+    # 2. Auto-detect via getprop when running in Android
     if [ -z "$CHOSEN_VARIANT" ] && [ "$BOOTMODE" = "true" ]; then
-        if command -v getprop >/dev/null 2>&1; then
-            OS_NAME=$(getprop ro.mi.os.version.name 2>/dev/null);
-            MIUI_NAME=$(getprop ro.miui.ui.version.name 2>/dev/null);
-            BUILD_INC=$(getprop ro.build.version.incremental 2>/dev/null);
-            if [ -n "$OS_NAME" ] || [ -n "$MIUI_NAME" ] || echo "$BUILD_INC" | grep -q -E "^V[0-9]|^OS[0-9]"; then
-                CHOSEN_VARIANT="stock";
-                ui_print "  -> [Live Detection] Xiaomi HyperOS / MIUI detected.";
-            else
-                CHOSEN_VARIANT="aosp";
-                ui_print "  -> [Live Detection] AOSP / Custom ROM detected.";
-            fi;
+        OS_NAME=$(getprop ro.mi.os.version.name 2>/dev/null);
+        MIUI_NAME=$(getprop ro.miui.ui.version.name 2>/dev/null);
+        BUILD_INC=$(getprop ro.build.version.incremental 2>/dev/null);
+        if [ -n "$OS_NAME" ] || [ -n "$MIUI_NAME" ] || echo "$BUILD_INC" | grep -q -E "^V[0-9]|^OS[0-9]"; then
+            CHOSEN_VARIANT="stock";
+            ui_print "  -> [Auto] Xiaomi HyperOS / MIUI detected.";
+        else
+            CHOSEN_VARIANT="aosp";
+            ui_print "  -> [Auto] AOSP / Custom ROM detected.";
         fi;
     fi;
 
-    # 3. Interactive Volume Button Selector (Recovery Mode)
+    # 3. Volume Button Selector (10-second timeout, defaults to AOSP)
     if [ -z "$CHOSEN_VARIANT" ]; then
-        ui_print "  -----------------------------------------";
-        ui_print "  CHOOSE KERNEL VARIANT (10s timeout):";
-        ui_print "  -> Press [VOLUME UP]   : AOSP (A11-A17 Custom ROMs)";
-        ui_print "  -> Press [VOLUME DOWN] : Stock (MIUI / HyperOS)";
-        ui_print "  -----------------------------------------";
-
+        ui_print "  CHOOSE VARIANT (10s timeout):";
+        ui_print "  [VOL+] AOSP   |   [VOL-] Stock/MIUI";
         START_TIME=$(date +%s);
-        TIMEOUT=10;
-
-        # Key listener loop
         while [ -z "$CHOSEN_VARIANT" ]; do
             NOW=$(date +%s);
-            ELAPSED=$((NOW - START_TIME));
-            if [ $ELAPSED -ge $TIMEOUT ]; then
-                ui_print "  [Timeout] No key pressed. Defaulting to AOSP...";
+            if [ $((NOW - START_TIME)) -ge 10 ]; then
+                ui_print "  [Timeout] Defaulting to AOSP...";
                 CHOSEN_VARIANT="aosp";
                 break;
             fi;
-
-            # Check key event via getevent
             if command -v getevent >/dev/null 2>&1; then
                 KEY_EVENT=$(getevent -l -c 1 2>/dev/null);
                 if echo "$KEY_EVENT" | grep -qi "KEY_VOLUMEUP.*DOWN"; then
                     CHOSEN_VARIANT="aosp";
-                    ui_print "  -> [VOL+] Pressed: Selected AOSP Kernel.";
+                    ui_print "  -> AOSP selected.";
                     break;
                 elif echo "$KEY_EVENT" | grep -qi "KEY_VOLUMEDOWN.*DOWN"; then
                     CHOSEN_VARIANT="stock";
-                    ui_print "  -> [VOL-] Pressed: Selected Stock Kernel (MIUI/HyperOS).";
+                    ui_print "  -> Stock (MIUI/HyperOS) selected.";
                     break;
                 fi;
             else
-                # Fallback if getevent is unavailable
                 CHOSEN_VARIANT="aosp";
                 break;
             fi;
@@ -115,7 +104,6 @@ if [ -f "$AKHOME/kernels/aosp/Image" ] && [ -f "$AKHOME/kernels/stock/Image" ]; 
         done;
     fi;
 
-    # Apply selected kernel Image (DO NOT touch DTB or DTBO to preserve ROM panel/touch calibration)
     if [ "$CHOSEN_VARIANT" = "stock" ]; then
         ui_print "  -> Flashing Stock Kernel (MIUI / HyperOS)...";
         cp -f "$AKHOME/kernels/stock/Image" "$AKHOME/Image";
@@ -131,30 +119,18 @@ elif [ -f "$AKHOME/kernels/aosp/Image" ]; then
     cp -f "$AKHOME/kernels/aosp/Image" "$AKHOME/Image";
 fi;
 
-# Verify that target Image exists before proceeding
-[ -f "$AKHOME/Image" -o -f "$AKHOME/boot-files/Image" ] || abort "  ! Kernel Image not found in $AKHOME";
-[ -f "$AKHOME/Image" ] || cp -af "$AKHOME/boot-files/Image" "$AKHOME/Image";
+# Verify Image is available (boot-files/ if ak3 auto-moved it during setup_ak)
+[ -f "$AKHOME/Image" ] || [ -f "$AKHOME/boot-files/Image" ] || abort "  ! Kernel Image not found";
 
 ui_print " ";
-ui_print "  -> Flashing kernel to boot partition...";
-split_boot;
-flash_boot;
-
-# Flash DTBO overlay if present
-if [ -f "$AKHOME/dtbo.img" -o -f "$AKHOME/dtbo" ]; then
-    ui_print "  -> Flashing hardware DTBO overlay...";
-    flash_generic dtbo;
-fi;
-
-# Flash hardware DTB to vendor_boot partition on A/B slot devices
-if [ -f "$AKHOME/dtb" -o -f "$AKHOME/vendor_boot-files/dtb" ]; then
-    ui_print "  -> Flashing hardware DTB to vendor_boot partition...";
-    BLOCK=vendor_boot;
-    block=vendor_boot;
-    reset_ak;
-    split_boot;
-    flash_boot;
-fi;
+ui_print "  -> Flashing boot + vendor_boot + dtbo...";
+# dump_boot: reads boot.img from device, splits it
+# write_boot: repacks Image + ramdisk -> boot.img, flashes boot
+#             then flashes dtbo (if dtbo.img present)
+#             ak3 auto-setup already moved dtb -> vendor_boot-files/dtb,
+#             so reset_ak + dump_boot + write_boot for vendor_boot happens automatically.
+dump_boot;
+write_boot;
 
 ui_print " ";
 ui_print "  ===========================================";
