@@ -119,60 +119,51 @@ fi
 echo ">>> Packaging flashable AnyKernel3 zip..."
 AK3_DIR="${OUT_DIR}/AK3"
 rm -rf "${AK3_DIR}"
-mkdir -p "${AK3_DIR}/kernels/aosp" "${AK3_DIR}/kernels/stock"
+mkdir -p "${AK3_DIR}"
 
 if [ -d "${ROOT_DIR}/anykernel" ]; then
     cp -r "${ROOT_DIR}/anykernel/"* "${AK3_DIR}/"
-else
-    git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git "${AK3_DIR}_repo"
-    cp -r "${AK3_DIR}_repo/"* "${AK3_DIR}/"
-    rm -rf "${AK3_DIR}_repo"
 fi
 
-# Stage kernel images
-if [ "$BUILD_VARIANT" = "aosp" ]; then
-    rm -rf "${AK3_DIR}/kernels"
-    cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/Image"
-elif [ "$BUILD_VARIANT" = "stock" ]; then
-    rm -rf "${AK3_DIR}/kernels"
-    cp -f "${OUT_DIR}/stock/arch/arm64/boot/Image" "${AK3_DIR}/Image"
+# Stage kernel image as MUNCH-Image
+if [ "$BUILD_VARIANT" = "stock" ]; then
+    cp -f "${OUT_DIR}/stock/arch/arm64/boot/Image" "${AK3_DIR}/MUNCH-Image"
 else
-    mkdir -p "${AK3_DIR}/kernels/aosp" "${AK3_DIR}/kernels/stock"
-    if [ -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" ]; then
-        cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/kernels/aosp/Image"
-        cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/Image"
-    fi
-    if [ -f "${OUT_DIR}/stock/arch/arm64/boot/Image" ]; then
-        cp -f "${OUT_DIR}/stock/arch/arm64/boot/Image" "${AK3_DIR}/kernels/stock/Image"
-    fi
+    cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/MUNCH-Image"
 fi
 
-# Ensure hardware DTB and DTBO are included for vendor_boot and dtbo flashing
+# Ensure hardware DTB and DTBO are staged as MUNCH-dtb and MUNCH-dtbo.img
 if [ -f "${ROOT_DIR}/anykernel/dtb" ]; then
-    cp -f "${ROOT_DIR}/anykernel/dtb" "${AK3_DIR}/dtb"
+    cp -f "${ROOT_DIR}/anykernel/dtb" "${AK3_DIR}/MUNCH-dtb"
 fi
 if [ -f "${ROOT_DIR}/anykernel/dtbo.img" ]; then
-    cp -f "${ROOT_DIR}/anykernel/dtbo.img" "${AK3_DIR}/dtbo.img"
+    cp -f "${ROOT_DIR}/anykernel/dtbo.img" "${AK3_DIR}/MUNCH-dtbo.img"
 fi
 
 # Ensure anykernel.sh is present and executable
 if [ -f "${ROOT_DIR}/anykernel/anykernel.sh" ]; then
     cp -f "${ROOT_DIR}/anykernel/anykernel.sh" "${AK3_DIR}/anykernel.sh"
+    chmod +x "${AK3_DIR}/anykernel.sh"
 fi
 
-cd "${AK3_DIR}"
-rm -rf .git README.md *placeholder
+# Clean loose files from staging (keep only META-INF, tools, anykernel.sh, MUNCH-*)
+rm -rf "${AK3_DIR}/kernels" "${AK3_DIR}/dtb" "${AK3_DIR}/dtbo.img" "${AK3_DIR}/Image" "${AK3_DIR}/.git" "${AK3_DIR}/README.md" "${AK3_DIR}/LICENSE" "${AK3_DIR}/modules" "${AK3_DIR}/patch" "${AK3_DIR}/ramdisk"
 
+cd "${AK3_DIR}"
 ZIP_NAME="${KERNEL_NAME}-${DEVICE}-${BUILD_VARIANT^}-${DATE}.zip"
-zip -r9 "${OUT_DIR}/${ZIP_NAME}" * -x .git README.md
+zip -r9 "${OUT_DIR}/${ZIP_NAME}" *
 
 echo "================================================="
 echo "  Build Completed Successfully!"
 echo "  Zip Location: ${OUT_DIR}/${ZIP_NAME}"
 echo "================================================="
 
-# Copy to Windows Desktop if running under WSL
+# Copy to Windows Desktop and Downloads if running under WSL
 if [ -d "/mnt/c/Users/ARUN/Desktop" ]; then
-    cp -f "${OUT_DIR}/${ZIP_NAME}" "/mnt/c/Users/ARUN/Desktop/"
+    cp -f "${OUT_DIR}/${ZIP_NAME}" "/mnt/c/Users/ARUN/Desktop/${ZIP_NAME}"
+    cp -f "${OUT_DIR}/${ZIP_NAME}" "/mnt/c/Users/ARUN/Desktop/Ignis-Rei-munch-Aosp.zip"
     echo "  Copied to Desktop: C:\\Users\\ARUN\\Desktop\\${ZIP_NAME}"
+fi
+if [ -d "/mnt/c/Users/ARUN/Downloads" ]; then
+    cp -f "${OUT_DIR}/${ZIP_NAME}" "/mnt/c/Users/ARUN/Downloads/Ignis-Rei-munch-Aosp.zip"
 fi
