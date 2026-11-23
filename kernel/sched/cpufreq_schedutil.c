@@ -1269,9 +1269,9 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	/* Fast ramp-up (500us) for 120Hz responsiveness; 5000us down-rate prevents stutter */
+	/* Gaming performance tuning: instant ramp up (500us), smooth ramp down (20ms) */
 	tunables->up_rate_limit_us = 500;
-	tunables->down_rate_limit_us = 5000;
+	tunables->down_rate_limit_us = 20000;
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;
 
