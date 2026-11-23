@@ -1,6 +1,6 @@
 ### AnyKernel3 Ramdisk Mod Script
 ## osm0sis @ xda-developers
-## Ignis-Rei Universal Kernel for POCO F4 / Redmi K40S (munch)
+## Ignis-Rei for POCO F4 / Redmi K40S (munch)
 
 properties() { '
 kernel.string=Ignis-Rei Kernel | munch
@@ -11,15 +11,6 @@ do.cleanup=1
 do.cleanuponabort=0
 device.name1=munch
 device.name2=munchin
-device.name3=alioth
-device.name4=aliothin
-device.name5=apollo
-device.name6=apolloin
-device.name7=lmi
-device.name8=ossi
-device.name9=OP515BL1
-device.name10=OnePlus8T
-device.name11=lemonades
 '; }
 
 BLOCK=/dev/block/bootdevice/by-name/boot;
@@ -49,8 +40,7 @@ home="$AKHOME";
 ui_print " ";
 ui_print "  ===========================================";
 ui_print "  |       Ignis-Rei Kernel | munch          |";
-ui_print "  |        Universal Multi-ROM Kernel       |";
-ui_print "  |          Android 11 - 17 Ready          |";
+ui_print "  |          Android 11 - 17                |";
 ui_print "  ===========================================";
 ui_print " ";
 
@@ -204,15 +194,15 @@ elif [ "$IS_MIUI" -eq 1 ]; then
     rom_arg="rom_oem";
     ui_print "  -> ROM Detected : ${ROM_TYPE:-Xiaomi MIUI / HyperOS}";
     [ -n "$ROM_DETAIL" ] && ui_print "  -> Details      : $ROM_DETAIL";
-    ui_print "  -> Mode         : Stock OEM Mode (rom_oem)";
+    ui_print "  -> Mode         : Stock Mode (rom_oem)";
 else
     rom_arg="rom_aosp";
     ui_print "  -> ROM Detected : ${ROM_TYPE:-AOSP / Custom ROM}";
-    ui_print "  -> Mode         : Pure AOSP Mode (rom_aosp)";
+    ui_print "  -> Mode         : AOSP Mode (rom_aosp)";
 fi;
 ui_print "--------------------------------------";
 
-ui_print "- Flashing kernel to boot partition...";
+ui_print "- Flashing kernel...";
 split_boot;
 patch_cmdline "e404_args" "e404_args=${rom_arg:-rom_aosp},dtbo_oem,dtb_def,batt_def";
 flash_boot;
