@@ -52,35 +52,15 @@ ui_print "  |          Android 11 - 17 Ready          |"
 ui_print "  ==========================================="
 ui_print " "
 
-# Rename staged files (MUNCH-Image -> Image, MUNCH-dtb -> dtb, MUNCH-dtbo.img -> dtbo.img)
+# Rename staged Image
 mv *-Image $home/Image 2>/dev/null || true
-mv *-dtb $home/dtb 2>/dev/null || true
-mv *-dtbo.img $home/dtbo.img 2>/dev/null || true
 
 # Verify Image exists
 [ -f "$home/Image" ] || abort "  ! Kernel Image not found in $home";
 
-ui_print "--> Flashing kernel to boot partition and dtbo overlay..."
-dump_boot
-write_boot
-
-if [[ $is_slot_device == 1 ]]; then
-  ui_print "--> Flashing hardware DTB to vendor_boot partition..."
-  block=/dev/block/bootdevice/by-name/vendor_boot
-  for testpath in /dev/block/bootdevice/by-name /dev/block/by-name /dev/block/mapper; do
-    if [ -e "$testpath/vendor_boot_a" ] || [ -e "$testpath/vendor_boot" ]; then
-      block="$testpath/vendor_boot"
-      break
-    fi
-  done
-  ramdisk_compression=auto
-  patch_vbmeta_flag=auto
-  reset_ak
-  dump_boot
-  write_boot
-else
-  ui_print "--> Installing to boot partition... "
-fi
+ui_print "--> Flashing kernel to boot partition..."
+split_boot
+flash_boot
 
 ui_print " "
 ui_print "  ==========================================="

@@ -132,21 +132,13 @@ else
     cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/MUNCH-Image"
 fi
 
-# Ensure hardware DTB and DTBO are staged as MUNCH-dtb and MUNCH-dtbo.img
-if [ -f "${ROOT_DIR}/anykernel/dtb" ]; then
-    cp -f "${ROOT_DIR}/anykernel/dtb" "${AK3_DIR}/MUNCH-dtb"
-fi
-if [ -f "${ROOT_DIR}/anykernel/dtbo.img" ]; then
-    cp -f "${ROOT_DIR}/anykernel/dtbo.img" "${AK3_DIR}/MUNCH-dtbo.img"
-fi
-
 # Ensure anykernel.sh is present and executable
 if [ -f "${ROOT_DIR}/anykernel/anykernel.sh" ]; then
     cp -f "${ROOT_DIR}/anykernel/anykernel.sh" "${AK3_DIR}/anykernel.sh"
     chmod +x "${AK3_DIR}/anykernel.sh"
 fi
 
-# Clean loose files from staging (keep only META-INF, tools, anykernel.sh, MUNCH-*)
+# Clean loose files from staging (keep only META-INF, tools, anykernel.sh, MUNCH-Image)
 rm -rf "${AK3_DIR}/kernels" "${AK3_DIR}/dtb" "${AK3_DIR}/dtbo.img" "${AK3_DIR}/Image" "${AK3_DIR}/.git" "${AK3_DIR}/README.md" "${AK3_DIR}/LICENSE" "${AK3_DIR}/modules" "${AK3_DIR}/patch" "${AK3_DIR}/ramdisk"
 
 cd "${AK3_DIR}"
