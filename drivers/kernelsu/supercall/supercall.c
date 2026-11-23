@@ -132,7 +132,7 @@ int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
 			track_throne(false);
 		}
 		ksu_install_fd();
-		if (arg3 && put_user((u32)33327, (u32 __user *)arg3))
+		if (arg3 && put_user((u32)KSU_VERSION, (u32 __user *)arg3))
 			return -EFAULT;
 		if (arg4 && put_user((u32)0, (u32 __user *)arg4))
 			return -EFAULT;
