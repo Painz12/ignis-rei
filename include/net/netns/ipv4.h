@@ -180,6 +180,10 @@ struct netns_ipv4 {
 	int sysctl_udp_wmem_min;
 	int sysctl_udp_rmem_min;
 
+#if defined(CONFIG_OPLUS_PORT) || defined(CONFIG_E404_OPLUS)
+	int sysctl_tcp_random_timestamp;
+#endif
+
 	int sysctl_fib_notify_on_flag_change;
 
 #ifdef CONFIG_NET_L3_MASTER_DEV

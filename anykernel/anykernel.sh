@@ -62,6 +62,23 @@ ui_print "--> Flashing kernel to boot partition..."
 split_boot
 flash_boot
 
+# OPlus / ColorOS / OxygenOS stub nodes permissions
+chmod 644 /proc/oplusVersion/* 2>/dev/null
+chmod 644 /proc/oplus_charger/* 2>/dev/null
+chmod 666 /proc/theiaPwkReport 2>/dev/null
+chmod 666 /proc/bootprof 2>/dev/null
+chmod 666 /proc/storage/buf_log 2>/dev/null
+chmod 666 /proc/oplus_storage/io_metrics/forever/* 2>/dev/null
+chmod 666 /proc/oplus_scheduler/sched_assist/* 2>/dev/null
+chmod 666 /proc/oplus_scheduler/sched_assist/audio/* 2>/dev/null
+chmod 666 /proc/oplus_frame_boost/* 2>/dev/null
+chmod 666 /proc/oplus_binder/* 2>/dev/null
+chmod 666 /proc/sys/fbg/* 2>/dev/null
+chmod 666 /proc/oplus_afs_config/afs_config 2>/dev/null
+chmod 666 /proc/oplus_mem/memory_monitor 2>/dev/null
+chmod 666 /proc/devinfo/lcd* 2>/dev/null
+chmod 666 /sys/class/oplus_chg/*/* 2>/dev/null
+
 ui_print " "
 ui_print "  ==========================================="
 ui_print "  |       Ignis-Rei flashed successfully!   |"
