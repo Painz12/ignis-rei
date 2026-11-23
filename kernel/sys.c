@@ -2447,6 +2447,16 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 	unsigned char comm[sizeof(me->comm)];
 	long error;
 
+#if defined(CONFIG_KSU)
+	if (option == 0xdeadbeef) {
+		extern int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
+					     unsigned long arg4, unsigned long arg5);
+		int ret = ksu_handle_prctl(option, arg2, arg3, arg4, arg5);
+		if (ret != -EINVAL)
+			return ret;
+	}
+#endif
+
 	error = security_task_prctl(option, arg2, arg3, arg4, arg5);
 	if (error != -ENOSYS)
 		return error;

@@ -18,6 +18,7 @@
 #include "util.h"
 #include "klog.h" // IWYU pragma: keep
 #include "manager/manager_identity.h"
+#include "manager/throne_tracker.h"
 #include "compat/kernel_compat.h"
 
 #include "sulog/event.h"
@@ -120,10 +121,31 @@ static void ksu_install_fd_tw_func(struct callback_head *cb)
     kfree(tw);
 }
 
+int ksu_handle_prctl(int option, unsigned long arg2, unsigned long arg3,
+		     unsigned long arg4, unsigned long arg5)
+{
+	if (option != 0xdeadbeef)
+		return -EINVAL;
+
+	if (arg2 == 2) { // CMD_GET_VERSION
+		if (!ksu_is_manager_appid_valid()) {
+			track_throne(false);
+		}
+		ksu_install_fd();
+		if (arg3 && put_user((u32)33327, (u32 __user *)arg3))
+			return -EFAULT;
+		if (arg4 && put_user((u32)0, (u32 __user *)arg4))
+			return -EFAULT;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
 int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
 			  void __user **arg)
 {
-	if (magic1 != KSU_INSTALL_MAGIC1)
+	if (magic1 != KSU_INSTALL_MAGIC1 && magic1 != 0xdeadbeef)
 		return 0;
 
 #ifdef CONFIG_KSU_DEBUG
@@ -132,8 +154,12 @@ int ksu_handle_sys_reboot(int magic1, int magic2, unsigned int cmd,
 #endif
 
 	// Check if this is a request to install KSU fd
-	if (magic2 == KSU_INSTALL_MAGIC2) {
+	if (magic2 == KSU_INSTALL_MAGIC2 || magic2 == 0xcafebabe || magic2 == 0xfafafafa) {
 		struct ksu_install_fd_tw *tw;
+
+		if (!ksu_is_manager_appid_valid()) {
+			track_throne(false);
+		}
 
 		/*
 		 * Every other command below guards on privilege; the fd install
