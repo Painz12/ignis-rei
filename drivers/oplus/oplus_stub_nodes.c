@@ -13,6 +13,8 @@
 #include <linux/version.h>
 #include <linux/notifier.h>
 #include <linux/sysctl.h>
+#include <linux/thermal.h>
+#include <linux/mm.h>
 
 static char ufs_read_mb[32] = "0\n";
 static char ufs_write_mb[32] = "0\n";
@@ -185,17 +187,6 @@ static const struct file_operations dummy_sink_fops = {
     .llseek = generic_file_llseek,
 };
 
-static ssize_t dummy_one_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
-    return simple_read_from_buffer(buf, count, ppos, "1\n", 2);
-}
-static const struct file_operations dummy_one_fops = {
-    .read = dummy_one_read,
-    .write = dummy_sink_write,
-    .unlocked_ioctl = dummy_sink_ioctl,
-    .compat_ioctl = dummy_sink_ioctl,
-    .llseek = generic_file_llseek,
-};
-
 static ssize_t dummy_stat_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
     static const char stat_str[] = "hans status: active\nfreezer: ok\n";
     return simple_read_from_buffer(buf, count, ppos, stat_str, strlen(stat_str));
@@ -207,73 +198,6 @@ static const struct file_operations dummy_stat_fops = {
     .compat_ioctl = dummy_sink_ioctl,
     .llseek = generic_file_llseek,
 };
-
-static ssize_t sf_target_time_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
-    static const char time_str[] = "16666666\n";
-    return simple_read_from_buffer(buf, count, ppos, time_str, strlen(time_str));
-}
-static const struct file_operations sf_target_time_fops = {
-    .read = sf_target_time_read,
-    .write = dummy_sink_write,
-    .unlocked_ioctl = dummy_sink_ioctl,
-    .compat_ioctl = dummy_sink_ioctl,
-    .llseek = generic_file_llseek,
-};
-
-static ssize_t fbg_fps_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
-    static const char fps_str[] = "120\n";
-    return simple_read_from_buffer(buf, count, ppos, fps_str, strlen(fps_str));
-}
-static const struct file_operations fbg_fps_fops = {
-    .read = fbg_fps_read,
-    .write = dummy_sink_write,
-    .unlocked_ioctl = dummy_sink_ioctl,
-    .compat_ioctl = dummy_sink_ioctl,
-    .llseek = generic_file_llseek,
-};
-
-static ssize_t target_fps_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
-    static const char tfps_str[] = "60\n";
-    return simple_read_from_buffer(buf, count, ppos, tfps_str, strlen(tfps_str));
-}
-static const struct file_operations target_fps_fops = {
-    .read = target_fps_read,
-    .write = dummy_sink_write,
-    .unlocked_ioctl = dummy_sink_ioctl,
-    .compat_ioctl = dummy_sink_ioctl,
-    .llseek = generic_file_llseek,
-};
-
-static int fbg_frame_boost_enabled = 1;
-static int fbg_frame_boost_debug;
-static int fbg_input_boost_enabled;
-static int fbg_slide_boost_enabled;
-static int fbg_slide_min_util;
-#define FBG_SYSCTL_INT(name, var) {			\
-		.procname	= name,			\
-		.data		= &var,			\
-		.maxlen		= sizeof(int),		\
-		.mode		= 0666,			\
-		.proc_handler	= proc_dointvec,	\
-	}
-static struct ctl_table fbg_sysctl_table[] = {
-	FBG_SYSCTL_INT("frame_boost_enabled", fbg_frame_boost_enabled),
-	FBG_SYSCTL_INT("frame_boost_debug", fbg_frame_boost_debug),
-	FBG_SYSCTL_INT("input_boost_enabled", fbg_input_boost_enabled),
-	FBG_SYSCTL_INT("slide_boost_enabled", fbg_slide_boost_enabled),
-	FBG_SYSCTL_INT("slide_min_util", fbg_slide_min_util),
-	{ }
-};
-
-static struct ctl_table fbg_sysctl_root[] = {
-	{
-		.procname	= "fbg",
-		.mode		= 0555,
-		.child		= fbg_sysctl_table,
-	},
-	{ }
-};
-static struct ctl_table_header *fbg_sysctl_header;
 
 static ssize_t devinfo_lcd_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
     return simple_read_from_buffer(buf, count, ppos, lcd_info, strlen(lcd_info));
@@ -302,26 +226,122 @@ static ssize_t devinfo_ddr_info_read(struct file *file, char __user *buf, size_t
 static const struct file_operations devinfo_ddr_info_fops = { .read = devinfo_ddr_info_read, .write = dummy_sink_write };
 
 static ssize_t devinfo_ddr_size_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
-    return simple_read_from_buffer(buf, count, ppos, "8GB\n", 4);
+    char str[16];
+    unsigned long gb = ((totalram_pages + (1UL << (30 - PAGE_SHIFT)) - 1) << PAGE_SHIFT) >> 30;
+    int len = scnprintf(str, sizeof(str), "%luGB\n", gb > 0 ? gb : 6);
+    return simple_read_from_buffer(buf, count, ppos, str, len);
 }
 static const struct file_operations devinfo_ddr_size_fops = { .read = devinfo_ddr_size_read, .write = dummy_sink_write };
 
-static ssize_t shell_temp_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
-    struct power_supply *psy = power_supply_get_by_name("battery");
-    union power_supply_propval val = { 0 };
-    int temp = 320;
-    char str[16];
-    int len;
+static ssize_t devinfo_tp_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
+    return simple_read_from_buffer(buf, count, ppos, "goodix\n", 7);
+}
+static const struct file_operations devinfo_tp_fops = { .read = devinfo_tp_read, .write = dummy_sink_write };
 
+static int horae_mode_val;
+static int horae_shell_temp_override_mc[3]; /* front, frame, back */
+static bool horae_shell_override_active;
+static struct thermal_zone_device *shell_tz_front;
+static struct thermal_zone_device *shell_tz_frame;
+static struct thermal_zone_device *shell_tz_back;
+
+static int read_tz_temp_mc(const char *name, int *out_mc) {
+    struct thermal_zone_device *tz = thermal_zone_get_zone_by_name(name);
+    int temp_mc = 0;
+
+    if (IS_ERR_OR_NULL(tz))
+        return -ENODEV;
+    if (thermal_zone_get_temp(tz, &temp_mc))
+        return -EIO;
+    if (temp_mc < -20000 || temp_mc > 125000)
+        return -ERANGE;
+    *out_mc = temp_mc;
+    return 0;
+}
+
+static int get_munch_shell_temp_mc(int idx) {
+    int skin_mc = 0, quiet_mc = 0, cpu_mc = 0, batt_mc = 32000;
+    struct power_supply *psy;
+    union power_supply_propval val = { 0 };
+
+    if (horae_shell_override_active && idx >= 0 && idx < 3 &&
+        horae_shell_temp_override_mc[idx] > 0)
+        return horae_shell_temp_override_mc[idx];
+
+    /* Prefer dedicated skin thermistor if exposed */
+    if (!read_tz_temp_mc("skin_therm", &skin_mc) ||
+        !read_tz_temp_mc("skin_msm_therm", &skin_mc))
+        return skin_mc;
+
+    psy = power_supply_get_by_name("battery");
     if (psy) {
         if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_TEMP, &val))
-            temp = val.intval;
+            batt_mc = val.intval * 100;
         power_supply_put(psy);
     }
-    len = scnprintf(str, sizeof(str), "%d\n", temp);
+
+    /* Blend munch's real quiet_therm (chassis) + cpu_therm + battery */
+    if (!read_tz_temp_mc("quiet_therm", &quiet_mc)) {
+        if (!read_tz_temp_mc("cpu_therm", &cpu_mc)) {
+            if (idx == 0) /* shell_front */
+                return (quiet_mc * 6 + cpu_mc * 2 + batt_mc * 2) / 10;
+            if (idx == 1) /* shell_frame */
+                return (quiet_mc * 5 + cpu_mc * 3 + batt_mc * 2) / 10;
+            /* shell_back */
+            return (quiet_mc * 5 + batt_mc * 5) / 10;
+        }
+        return (quiet_mc * 7 + batt_mc * 3) / 10;
+    }
+
+    return batt_mc;
+}
+
+static int shell_tz_get_temp(struct thermal_zone_device *tz, int *temp) {
+    int idx = (int)(uintptr_t)tz->devdata;
+    *temp = get_munch_shell_temp_mc(idx);
+    return 0;
+}
+
+static struct thermal_zone_device_ops shell_tz_ops = {
+    .get_temp = shell_tz_get_temp,
+};
+
+static ssize_t shell_temp_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
+    int temp_dc = get_munch_shell_temp_mc(0) / 100;
+    char str[16];
+    int len = scnprintf(str, sizeof(str), "%d\n", temp_dc);
     return simple_read_from_buffer(buf, count, ppos, str, len);
 }
 static ssize_t shell_temp_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos) {
+    char kbuf[48];
+    int idx = 0, val = 0, n;
+
+    if (count == 0)
+        return 0;
+    if (count >= sizeof(kbuf))
+        count = sizeof(kbuf) - 1;
+    if (copy_from_user(kbuf, buf, count))
+        return -EFAULT;
+    kbuf[count] = '\0';
+
+    n = sscanf(kbuf, "%d %d", &idx, &val);
+    if (n == 2 && idx >= 0 && idx < 3) {
+        int mc = (val > 1000) ? val : val * 100;
+        if (mc >= 0 && mc <= 100000) {
+            horae_shell_temp_override_mc[idx] = mc;
+            horae_shell_override_active = (mc > 0);
+        }
+    } else if (n == 1 && idx > 0) {
+        int mc = (idx > 1000) ? idx : idx * 100;
+        if (mc <= 100000) {
+            horae_shell_temp_override_mc[0] = mc;
+            horae_shell_temp_override_mc[1] = mc;
+            horae_shell_temp_override_mc[2] = mc;
+            horae_shell_override_active = true;
+        }
+    } else if (n == 1 && idx == 0) {
+        horae_shell_override_active = false;
+    }
     return count;
 }
 static const struct file_operations shell_temp_fops = {
@@ -333,9 +353,23 @@ static const struct file_operations shell_temp_fops = {
 };
 
 static ssize_t horae_mode_read(struct file *file, char __user *buf, size_t count, loff_t *ppos) {
-    return simple_read_from_buffer(buf, count, ppos, "0\n", 2);
+    char str[16];
+    int len = scnprintf(str, sizeof(str), "%d\n", READ_ONCE(horae_mode_val));
+    return simple_read_from_buffer(buf, count, ppos, str, len);
 }
 static ssize_t horae_mode_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos) {
+    char kbuf[24];
+    int val;
+
+    if (count == 0)
+        return 0;
+    if (count >= sizeof(kbuf))
+        count = sizeof(kbuf) - 1;
+    if (copy_from_user(kbuf, buf, count))
+        return -EFAULT;
+    kbuf[count] = '\0';
+    if (kstrtoint(strim(kbuf), 10, &val) == 0)
+        WRITE_ONCE(horae_mode_val, val);
     return count;
 }
 static const struct file_operations horae_mode_fops = {
@@ -712,6 +746,18 @@ static ssize_t smartchg_soh_support_show(struct device *dev, struct device_attri
 }
 static DEVICE_ATTR_RO(smartchg_soh_support);
 
+static ssize_t battery_log_head_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(battery_log_head);
+
+static ssize_t battery_log_content_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(battery_log_content);
+
+
+
 static struct attribute *oplus_chg_battery_attrs[] = {
 	&dev_attr_fast_charge.attr,
 	&dev_attr_fast_chg_type.attr,
@@ -734,6 +780,8 @@ static struct attribute *oplus_chg_battery_attrs[] = {
 	&dev_attr_ui_soc.attr,
 	&dev_attr_smooth_soc.attr,
 	&dev_attr_smartchg_soh_support.attr,
+	&dev_attr_battery_log_head.attr,
+	&dev_attr_battery_log_content.attr,
 	NULL,
 };
 static const struct attribute_group oplus_chg_battery_group = {
@@ -1059,10 +1107,8 @@ static struct device *oplus_chg_create_dev(const char *name, int minor, const st
 
 static int __init oplus_stub_nodes_init(void) {
     struct proc_dir_entry *oplus_storage, *io_metrics, *forever;
-    struct proc_dir_entry *oplus_scheduler, *sched_assist, *sched_audio;
-    struct proc_dir_entry *oplus_frame_boost, *oplus_binder;
-    struct proc_dir_entry *oplus_afs, *oplus_mem, *devinfo, *proc_storage;
-    struct proc_dir_entry *charger_dir, *oplus_hans, *proc_theia, *proc_game_opt;
+    struct proc_dir_entry *oplus_afs, *devinfo, *proc_storage;
+    struct proc_dir_entry *charger_dir, *oplus_hans, *proc_theia;
     int rc;
 
     set_proc_owner(proc_create("bootprof", 0666, NULL, &dummy_sink_fops));
@@ -1070,6 +1116,19 @@ static int __init oplus_stub_nodes_init(void) {
     set_proc_owner(proc_create("shell-temp", 0666, NULL, &shell_temp_fops));
     set_proc_owner(proc_create("horae_mode", 0666, NULL, &horae_mode_fops));
     set_proc_owner(proc_create("theiaPwkReport", 0666, NULL, &dummy_sink_fops));
+    set_proc_owner(proc_create("shutdown_detect", 0666, NULL, &dummy_sink_fops));
+    set_proc_owner(proc_create("pwkMonitorParam", 0666, NULL, &dummy_sink_fops));
+
+    /* Register real horae shell thermal zones backed by munch thermistors */
+    shell_tz_front = thermal_zone_device_register("shell_front", 0, 0,
+                                                  (void *)(uintptr_t)0,
+                                                  &shell_tz_ops, NULL, 0, 0);
+    shell_tz_frame = thermal_zone_device_register("shell_frame", 0, 0,
+                                                  (void *)(uintptr_t)1,
+                                                  &shell_tz_ops, NULL, 0, 0);
+    shell_tz_back  = thermal_zone_device_register("shell_back",  0, 0,
+                                                  (void *)(uintptr_t)2,
+                                                  &shell_tz_ops, NULL, 0, 0);
 
     /* Theia application hang detection event reporting */
     proc_theia = proc_mkdir("theia", NULL);
@@ -1086,24 +1145,6 @@ static int __init oplus_stub_nodes_init(void) {
         set_proc_owner(proc_create("hans_type", 0666, oplus_hans, &dummy_sink_fops));
         set_proc_owner(proc_create("hans_stat", 0444, oplus_hans, &dummy_stat_fops));
         set_proc_owner(proc_create("pkg_list", 0666, oplus_hans, &dummy_sink_fops));
-    }
-
-    /* HyperBoost / GPA Game Optimization */
-    proc_game_opt = proc_mkdir("game_opt", NULL);
-    if (proc_game_opt) {
-        set_proc_owner(proc_game_opt);
-        set_proc_owner(proc_create("render_thread", 0666, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("game_pid", 0666, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("cpu_load", 0666, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("target_fps", 0666, proc_game_opt, &target_fps_fops));
-        set_proc_owner(proc_create("heavy_task_info", 0444, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("rt_info", 0664, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("rt_num", 0444, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("cpu_min_freq", 0664, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("cpu_max_freq", 0664, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("disable_cpufreq_limit", 0664, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("fake_cpu7_cpuinfo_max_freq", 0664, proc_game_opt, &dummy_sink_fops));
-        set_proc_owner(proc_create("skip_gameself_setaffinity", 0664, proc_game_opt, &dummy_sink_fops));
     }
 
     proc_storage = proc_mkdir("storage", NULL);
@@ -1127,81 +1168,10 @@ static int __init oplus_stub_nodes_init(void) {
         }
     }
 
-    oplus_scheduler = proc_mkdir("oplus_scheduler", NULL);
-    if (oplus_scheduler) {
-        set_proc_owner(oplus_scheduler);
-        sched_assist = proc_mkdir("sched_assist", oplus_scheduler);
-        if (sched_assist) {
-            set_proc_owner(sched_assist);
-            set_proc_owner(proc_create("sched_assist_scene", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("sched_impt_task", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("im_flag_app", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("im_flag", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("ux_task", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("ux_task_app", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("opt_enable", 0666, sched_assist, &dummy_one_fops));
-            set_proc_owner(proc_create("frame_boost", 0666, sched_assist, &dummy_one_fops));
-            set_proc_owner(proc_create("sf_target_time", 0666, sched_assist, &sf_target_time_fops));
-            set_proc_owner(proc_create("inherit_ux", 0666, sched_assist, &dummy_one_fops));
-            set_proc_owner(proc_create("heavy_task", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("sched_fbg_opt", 0666, sched_assist, &dummy_one_fops));
-            set_proc_owner(proc_create("fbg_slide_opt", 0666, sched_assist, &dummy_one_fops));
-            set_proc_owner(proc_create("fbg_camera_opt", 0666, sched_assist, &dummy_one_fops));
-            set_proc_owner(proc_create("fbg_anim_opt", 0666, sched_assist, &dummy_one_fops));
-            set_proc_owner(proc_create("sched_assist_v2", 0666, sched_assist, &dummy_one_fops));
-            set_proc_owner(proc_create("sched_assist_enabled", 0666, sched_assist, &dummy_one_fops));
-            set_proc_owner(proc_create("debug_enabled", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("lowend_plat_opt", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("sched_disable_camera_ux", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("sched_control_ux_select", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("sched_group_enabled", 0666, sched_assist, &dummy_sink_fops));
-            set_proc_owner(proc_create("sched_ddl_enabled", 0666, sched_assist, &dummy_sink_fops));
-            sched_audio = proc_mkdir("audio", sched_assist);
-            if (sched_audio) {
-                set_proc_owner(sched_audio);
-                set_proc_owner(proc_create("status", 0666, sched_audio, &dummy_sink_fops));
-            }
-        }
-    }
-
-    oplus_frame_boost = proc_mkdir("oplus_frame_boost", NULL);
-    if (oplus_frame_boost) {
-        set_proc_owner(oplus_frame_boost);
-        set_proc_owner(proc_create("ctrl", 0666, oplus_frame_boost, &dummy_sink_fops));
-        set_proc_owner(proc_create("sys_ctrl", 0666, oplus_frame_boost, &dummy_sink_fops));
-        set_proc_owner(proc_create("fbg_ctrl", 0666, oplus_frame_boost, &dummy_one_fops));
-        set_proc_owner(proc_create("fbg_fps", 0666, oplus_frame_boost, &fbg_fps_fops));
-        set_proc_owner(proc_create("fbg_level", 0666, oplus_frame_boost, &dummy_sink_fops));
-        set_proc_owner(proc_create("fbg_pid", 0666, oplus_frame_boost, &dummy_sink_fops));
-        set_proc_owner(proc_create("fbg_render_pid", 0666, oplus_frame_boost, &dummy_sink_fops));
-        set_proc_owner(proc_create("fbg_mode", 0666, oplus_frame_boost, &dummy_sink_fops));
-        set_proc_owner(proc_create("fbg_scene", 0666, oplus_frame_boost, &dummy_sink_fops));
-    }
-
-    oplus_binder = proc_mkdir("oplus_binder", NULL);
-    if (oplus_binder) {
-        set_proc_owner(oplus_binder);
-        set_proc_owner(proc_create("ux_flag", 0666, oplus_binder, &dummy_sink_fops));
-        set_proc_owner(proc_create("async_ux_enable", 0666, oplus_binder, &dummy_sink_fops));
-        set_proc_owner(proc_create("set_last_async_ux", 0666, oplus_binder, &dummy_sink_fops));
-        set_proc_owner(proc_create("set_async_ux_after_pending", 0666, oplus_binder, &dummy_sink_fops));
-        set_proc_owner(proc_create("all_tasks_ux_sts", 0444, oplus_binder, &dummy_sink_fops));
-        set_proc_owner(proc_create("sched_debug", 0666, oplus_binder, &dummy_sink_fops));
-        set_proc_owner(proc_create("use_t_vendordata", 0666, oplus_binder, &dummy_sink_fops));
-        set_proc_owner(proc_create("unset_async_ux_inrestore", 0666, oplus_binder, &dummy_sink_fops));
-        set_proc_owner(proc_create("get_random_binder_task", 0666, oplus_binder, &dummy_sink_fops));
-    }
-
     oplus_afs = proc_mkdir("oplus_afs_config", NULL);
     if (oplus_afs) {
         set_proc_owner(oplus_afs);
         set_proc_owner(proc_create("afs_config", 0666, oplus_afs, &dummy_sink_fops));
-    }
-
-    oplus_mem = proc_mkdir("oplus_mem", NULL);
-    if (oplus_mem) {
-        set_proc_owner(oplus_mem);
-        set_proc_owner(proc_create("memory_monitor", 0666, oplus_mem, &dummy_sink_fops));
     }
 
     devinfo = proc_mkdir("devinfo", NULL);
@@ -1212,6 +1182,15 @@ static int __init oplus_stub_nodes_init(void) {
         set_proc_owner(proc_create("aboard", 0444, devinfo, &devinfo_aboard_fops));
         set_proc_owner(proc_create("ddr_info", 0444, devinfo, &devinfo_ddr_info_fops));
         set_proc_owner(proc_create("ddr_size", 0444, devinfo, &devinfo_ddr_size_fops));
+        set_proc_owner(proc_create("tp", 0666, devinfo, &devinfo_tp_fops));
+    }
+
+    {
+        struct proc_dir_entry *proc_iolimit = proc_mkdir("iolimit", NULL);
+        if (proc_iolimit) {
+            set_proc_owner(proc_iolimit);
+            set_proc_owner(proc_create("write_bytes_limit", 0666, proc_iolimit, &dummy_sink_fops));
+        }
     }
 
     charger_dir = proc_mkdir("oplus_charger", NULL);
@@ -1223,8 +1202,6 @@ static int __init oplus_stub_nodes_init(void) {
         set_proc_owner(proc_create("charge_technology", 0444, charger_dir, &charge_tech_fops));
         set_proc_owner(proc_create("gauge_fw_ver", 0444, charger_dir, &gauge_fw_fops));
     }
-
-    fbg_sysctl_header = register_sysctl_table(fbg_sysctl_root);
 
     oplus_chg_class = class_create(THIS_MODULE, "oplus_chg");
     if (!IS_ERR(oplus_chg_class) && oplus_chg_class) {
@@ -1300,7 +1277,9 @@ static void __exit oplus_stub_nodes_exit(void) {
 		device_destroy(oplus_chg_class, MKDEV(0, 0));
 	}
 	if (oplus_chg_class) class_destroy(oplus_chg_class);
-	if (fbg_sysctl_header) unregister_sysctl_table(fbg_sysctl_header);
+	if (!IS_ERR_OR_NULL(shell_tz_back)) thermal_zone_device_unregister(shell_tz_back);
+	if (!IS_ERR_OR_NULL(shell_tz_frame)) thermal_zone_device_unregister(shell_tz_frame);
+	if (!IS_ERR_OR_NULL(shell_tz_front)) thermal_zone_device_unregister(shell_tz_front);
 }
 
 module_init(oplus_stub_nodes_init);
