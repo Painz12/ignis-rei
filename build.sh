@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Ignis-Rei Kernel Build Script for POCO F4 / Redmi K40S (munch)
-# Dual Variant: AOSP (Custom ROMs) & Stock (MIUI / HyperOS)
+# Ignis-Rei Universal Kernel Build Script for POCO F4 / Redmi K40S (munch)
+# Universal Variants: KSU (KernelSU-Next) & No-KSU (Rootless)
 #
 
 set -e
 
 KERNEL_NAME="Ignis-Rei"
 DEVICE="munch"
-BUILD_VARIANT="${1:-both}" # aosp, stock, both
+BUILD_TARGET="${1:-all}" # all, ksu, noksu
 DATE=$(date +%Y%m%d-%H%M)
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${ROOT_DIR}"
@@ -48,9 +48,9 @@ export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 CLANG_VER=$("${TC_DIR}/bin/clang" --version | head -n 1)
 
 echo "================================================="
-echo "  Kernel Name : ${KERNEL_NAME}"
+echo "  Kernel Name : ${KERNEL_NAME} (Universal)"
 echo "  Device      : ${DEVICE} (POCO F4 / Redmi K40S)"
-echo "  Variant     : ${BUILD_VARIANT}"
+echo "  Target      : ${BUILD_TARGET}"
 echo "  Compiler    : ${CLANG_VER}"
 echo "  Date        : ${DATE}"
 echo "================================================="
@@ -75,22 +75,23 @@ MAKE_FLAGS=(
 )
 
 build_kernel() {
-    local variant="$1" # aosp or stock
+    local variant="$1" # ksu or noksu
     local out_sub="${OUT_DIR}/${variant}"
     mkdir -p "${out_sub}"
 
     echo ">>> Generating defconfig for [${variant}]..."
-    if [ "$variant" = "stock" ]; then
+    if [ "$variant" = "noksu" ]; then
         ./scripts/kconfig/merge_config.sh -m -O "${out_sub}" \
             arch/arm64/configs/vendor/kona-perf_defconfig \
             arch/arm64/configs/vendor/xiaomi/sm8250-common.config \
             arch/arm64/configs/vendor/xiaomi/munch.config \
-            arch/arm64/configs/vendor/xiaomi/stock.config
+            arch/arm64/configs/vendor/xiaomi/noksu.config
     else
         ./scripts/kconfig/merge_config.sh -m -O "${out_sub}" \
             arch/arm64/configs/vendor/kona-perf_defconfig \
             arch/arm64/configs/vendor/xiaomi/sm8250-common.config \
-            arch/arm64/configs/vendor/xiaomi/munch.config
+            arch/arm64/configs/vendor/xiaomi/munch.config \
+            arch/arm64/configs/vendor/xiaomi/ksu.config
     fi
     make O="${out_sub}" "${MAKE_FLAGS[@]}" olddefconfig
 
@@ -105,57 +106,69 @@ build_kernel() {
     echo ">>> Kernel [${variant}] compiled successfully!"
 }
 
+package_variant() {
+    local variant="$1" # ksu or noksu
+    local variant_label="KSU"
+    [ "$variant" = "noksu" ] && variant_label="NoKSU"
+
+    echo ">>> Packaging flashable AnyKernel3 zip for [${variant_label}]..."
+    local ak3_dir="${OUT_DIR}/AK3_${variant}"
+    rm -rf "${ak3_dir}"
+    mkdir -p "${ak3_dir}"
+
+    if [ -d "${ROOT_DIR}/anykernel" ]; then
+        cp -r "${ROOT_DIR}/anykernel/"* "${ak3_dir}/"
+    fi
+
+    # Stage kernel image as MUNCH-Image
+    cp -f "${OUT_DIR}/${variant}/arch/arm64/boot/Image" "${ak3_dir}/MUNCH-Image"
+
+    # Ensure anykernel.sh is present and executable
+    if [ -f "${ROOT_DIR}/anykernel/anykernel.sh" ]; then
+        cp -f "${ROOT_DIR}/anykernel/anykernel.sh" "${ak3_dir}/anykernel.sh"
+        chmod +x "${ak3_dir}/anykernel.sh"
+    fi
+
+    # Clean loose files from staging (keep only META-INF, tools, anykernel.sh, MUNCH-Image)
+    rm -rf "${ak3_dir}/kernels" "${ak3_dir}/dtb" "${ak3_dir}/dtbo.img" "${ak3_dir}/Image" "${ak3_dir}/.git" "${ak3_dir}/README.md" "${ak3_dir}/LICENSE" "${ak3_dir}/modules" "${ak3_dir}/patch" "${ak3_dir}/ramdisk"
+
+    cd "${ak3_dir}"
+    local zip_name="${KERNEL_NAME}-${DEVICE}-Universal-${variant_label}-${DATE}.zip"
+    zip -r9 "${OUT_DIR}/${zip_name}" *
+
+    echo "================================================="
+    echo "  ${variant_label} Build Completed Successfully!"
+    echo "  Zip Location: ${OUT_DIR}/${zip_name}"
+    echo "================================================="
+
+    # Copy to Windows Desktop and Downloads if running under WSL
+    if [ -d "/mnt/c/Users/ARUN/Desktop" ]; then
+        cp -f "${OUT_DIR}/${zip_name}" "/mnt/c/Users/ARUN/Desktop/${zip_name}"
+        cp -f "${OUT_DIR}/${zip_name}" "/mnt/c/Users/ARUN/Desktop/${KERNEL_NAME}-${DEVICE}-${variant_label}.zip"
+        echo "  Copied to Desktop: C:\Users\ARUN\Desktop\${zip_name}"
+        echo "  Copied to Desktop: C:\Users\ARUN\Desktop\${KERNEL_NAME}-${DEVICE}-${variant_label}.zip"
+    fi
+    if [ -d "/mnt/c/Users/ARUN/Downloads" ]; then
+        cp -f "${OUT_DIR}/${zip_name}" "/mnt/c/Users/ARUN/Downloads/${zip_name}"
+        cp -f "${OUT_DIR}/${zip_name}" "/mnt/c/Users/ARUN/Downloads/${KERNEL_NAME}-${DEVICE}-${variant_label}.zip"
+    fi
+    cd "${ROOT_DIR}"
+}
+
 # Execute builds
-if [ "$BUILD_VARIANT" = "aosp" ]; then
-    build_kernel "aosp"
-elif [ "$BUILD_VARIANT" = "stock" ]; then
-    build_kernel "stock"
-else
-    build_kernel "aosp"
-    build_kernel "stock"
-fi
-
-# AnyKernel3 Packaging
-echo ">>> Packaging flashable AnyKernel3 zip..."
-AK3_DIR="${OUT_DIR}/AK3"
-rm -rf "${AK3_DIR}"
-mkdir -p "${AK3_DIR}"
-
-if [ -d "${ROOT_DIR}/anykernel" ]; then
-    cp -r "${ROOT_DIR}/anykernel/"* "${AK3_DIR}/"
-fi
-
-# Stage kernel image as MUNCH-Image
-if [ "$BUILD_VARIANT" = "stock" ]; then
-    cp -f "${OUT_DIR}/stock/arch/arm64/boot/Image" "${AK3_DIR}/MUNCH-Image"
-else
-    cp -f "${OUT_DIR}/aosp/arch/arm64/boot/Image" "${AK3_DIR}/MUNCH-Image"
-fi
-
-# Ensure anykernel.sh is present and executable
-if [ -f "${ROOT_DIR}/anykernel/anykernel.sh" ]; then
-    cp -f "${ROOT_DIR}/anykernel/anykernel.sh" "${AK3_DIR}/anykernel.sh"
-    chmod +x "${AK3_DIR}/anykernel.sh"
-fi
-
-# Clean loose files from staging (keep only META-INF, tools, anykernel.sh, MUNCH-Image)
-rm -rf "${AK3_DIR}/kernels" "${AK3_DIR}/dtb" "${AK3_DIR}/dtbo.img" "${AK3_DIR}/Image" "${AK3_DIR}/.git" "${AK3_DIR}/README.md" "${AK3_DIR}/LICENSE" "${AK3_DIR}/modules" "${AK3_DIR}/patch" "${AK3_DIR}/ramdisk"
-
-cd "${AK3_DIR}"
-ZIP_NAME="${KERNEL_NAME}-${DEVICE}-${BUILD_VARIANT^}-${DATE}.zip"
-zip -r9 "${OUT_DIR}/${ZIP_NAME}" *
-
-echo "================================================="
-echo "  Build Completed Successfully!"
-echo "  Zip Location: ${OUT_DIR}/${ZIP_NAME}"
-echo "================================================="
-
-# Copy to Windows Desktop and Downloads if running under WSL
-if [ -d "/mnt/c/Users/ARUN/Desktop" ]; then
-    cp -f "${OUT_DIR}/${ZIP_NAME}" "/mnt/c/Users/ARUN/Desktop/${ZIP_NAME}"
-    cp -f "${OUT_DIR}/${ZIP_NAME}" "/mnt/c/Users/ARUN/Desktop/Ignis-Rei-munch-Aosp.zip"
-    echo "  Copied to Desktop: C:\\Users\\ARUN\\Desktop\\${ZIP_NAME}"
-fi
-if [ -d "/mnt/c/Users/ARUN/Downloads" ]; then
-    cp -f "${OUT_DIR}/${ZIP_NAME}" "/mnt/c/Users/ARUN/Downloads/Ignis-Rei-munch-Aosp.zip"
-fi
+case "$BUILD_TARGET" in
+    ksu)
+        build_kernel "ksu"
+        package_variant "ksu"
+        ;;
+    noksu)
+        build_kernel "noksu"
+        package_variant "noksu"
+        ;;
+    all|both|*)
+        build_kernel "ksu"
+        package_variant "ksu"
+        build_kernel "noksu"
+        package_variant "noksu"
+        ;;
+esac

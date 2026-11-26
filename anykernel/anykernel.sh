@@ -205,6 +205,7 @@ ui_print "--------------------------------------";
 ui_print "- Flashing kernel...";
 split_boot;
 patch_cmdline "e404_args" "e404_args=${rom_arg:-rom_aosp},dtbo_oem,dtb_def,batt_def";
+patch_cmdline "audit" "audit=0";
 flash_boot;
 
 chmod 644 /proc/oplusVersion/* 2>/dev/null
@@ -222,6 +223,9 @@ chmod 666 /proc/oplus_afs_config/afs_config 2>/dev/null
 chmod 666 /proc/oplus_mem/memory_monitor 2>/dev/null
 chmod 666 /proc/devinfo/lcd* 2>/dev/null
 chmod 666 /sys/class/oplus_chg/*/* 2>/dev/null
+pm disable com.oplus.audio.dolbyservice 2>/dev/null || true
+settings put global hidden_api_policy 1 2>/dev/null || true
+
 
 ui_print " ";
 ui_print "  ===========================================";
