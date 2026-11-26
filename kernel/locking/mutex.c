@@ -29,6 +29,7 @@
 #include <linux/debug_locks.h>
 #include <linux/osq_lock.h>
 #include <linux/delay.h>
+#include <linux/oplus_sched_assist.h>
 
 #ifdef CONFIG_DEBUG_MUTEXES
 # include "mutex-debug.h"
@@ -728,6 +729,8 @@ static noinline void __sched __mutex_unlock_slowpath(struct mutex *lock, unsigne
  */
 void __sched mutex_unlock(struct mutex *lock)
 {
+	if (unlikely(oplus_test_inherit_ux(current, INHERIT_UX_MUTEX)))
+		oplus_unset_inherit_ux(current, INHERIT_UX_MUTEX);
 #ifndef CONFIG_DEBUG_LOCK_ALLOC
 	if (__mutex_unlock_fast(lock))
 		return;
@@ -1022,6 +1025,16 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 			ret = __ww_mutex_check_kill(lock, &waiter, ww_ctx);
 			if (ret)
 				goto err;
+		}
+
+		if (unlikely(oplus_is_ux_task(current))) {
+			struct task_struct *owner;
+
+			rcu_read_lock();
+			owner = __mutex_owner(lock);
+			if (owner && owner != current)
+				oplus_set_inherit_ux(owner, INHERIT_UX_MUTEX);
+			rcu_read_unlock();
 		}
 
 		spin_unlock(&lock->wait_lock);

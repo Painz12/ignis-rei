@@ -17,6 +17,8 @@
  *  4) Other non-zero value
  *     - a writer owns the lock and other writers can spin on the lock owner.
  */
+#include <linux/oplus_sched_assist.h>
+
 #define RWSEM_ANONYMOUSLY_OWNED	(1UL << 0)
 #define RWSEM_READER_OWNED	((struct task_struct *)RWSEM_ANONYMOUSLY_OWNED)
 
@@ -52,6 +54,8 @@ static inline void rwsem_set_owner(struct rw_semaphore *sem)
 
 static inline void rwsem_clear_owner(struct rw_semaphore *sem)
 {
+	if (unlikely(oplus_test_inherit_ux(current, INHERIT_UX_RWSEM)))
+		oplus_unset_inherit_ux(current, INHERIT_UX_RWSEM);
 	WRITE_ONCE(sem->owner, NULL);
 }
 

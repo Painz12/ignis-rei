@@ -24,6 +24,7 @@
 
 #include "pelt.h"
 #include "walt.h"
+#include <linux/oplus_sched_assist.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
@@ -1281,33 +1282,63 @@ static void uclamp_fork(struct task_struct *p)
 }
 
 #ifdef CONFIG_SMP
+#ifdef CONFIG_SCHED_TUNE
+extern long schedtune_task_margin(struct task_struct *task);
+#endif
+
 unsigned int uclamp_task(struct task_struct *p)
 {
 	unsigned long util;
+	unsigned long min_u = uclamp_eff_value(p, UCLAMP_MIN);
+	unsigned long max_u = uclamp_eff_value(p, UCLAMP_MAX);
+	unsigned long ux_min = oplus_ux_min_util(p);
 
 	util = task_util_est(p);
-	util = max(util, uclamp_eff_value(p, UCLAMP_MIN));
-	util = min(util, uclamp_eff_value(p, UCLAMP_MAX));
+#ifdef CONFIG_SCHED_TUNE
+	util += schedtune_task_margin(p);
+#endif
+	if (ux_min > min_u)
+		min_u = ux_min;
+	util = max(util, min_u);
+	util = min(util, max_u);
 
 	return util;
 }
 
 bool uclamp_boosted(struct task_struct *p)
 {
-	return uclamp_eff_value(p, UCLAMP_MIN) > 0;
+	if (uclamp_eff_value(p, UCLAMP_MIN) > 0)
+		return true;
+#ifdef CONFIG_SCHED_TUNE
+	if (schedtune_task_boost(p) > 0)
+		return true;
+#endif
+	return oplus_is_ux_task(p);
 }
 
 bool uclamp_latency_sensitive(struct task_struct *p)
 {
+	if (oplus_is_ux_task(p))
+		return true;
+#ifdef CONFIG_SCHED_TUNE
+	if (schedtune_prefer_idle(p) != 0)
+		return true;
+#endif
 #ifdef CONFIG_UCLAMP_TASK_GROUP
-	struct cgroup_subsys_state *css = task_css(p, cpu_cgrp_id);
-	struct task_group *tg;
+	{
+		struct cgroup_subsys_state *css;
+		struct task_group *tg;
+		bool ls = false;
 
-	if (!css)
-		return false;
-	tg = container_of(css, struct task_group, css);
-
-	return tg->latency_sensitive;
+		rcu_read_lock();
+		css = task_css(p, cpu_cgrp_id);
+		if (css) {
+			tg = container_of(css, struct task_group, css);
+			ls = tg->latency_sensitive;
+		}
+		rcu_read_unlock();
+		return ls;
+	}
 #else
 	return false;
 #endif

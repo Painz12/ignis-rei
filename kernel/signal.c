@@ -46,6 +46,7 @@
 #include <linux/oom.h>
 #include <linux/capability.h>
 #include <linux/cgroup.h>
+#include <linux/oplus_sched_assist.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/signal.h>
@@ -1112,6 +1113,8 @@ static int __send_signal(int sig, struct siginfo *info, struct task_struct *t,
 		goto ret;
 
 	result = TRACE_SIGNAL_DELIVERED;
+	if (unlikely(sig == SIGKILL))
+		oplus_record_sigkill(t, current);
 	/*
 	 * fast-pathed signals for kernel-internal things like SIGSTOP
 	 * or SIGKILL.
@@ -1819,6 +1822,8 @@ int send_sigqueue(struct sigqueue *q, struct pid *pid, enum pid_type type)
 	sigaddset(&pending->signal, sig);
 	complete_signal(sig, t, type);
 	result = TRACE_SIGNAL_DELIVERED;
+	if (unlikely(sig == SIGKILL))
+		oplus_record_sigkill(t, current);
 out:
 	trace_signal_generate(sig, &q->info, t, type != PIDTYPE_PID, result);
 	unlock_task_sighand(t, &flags);

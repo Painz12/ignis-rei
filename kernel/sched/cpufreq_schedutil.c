@@ -16,6 +16,7 @@
 #include <linux/sched/cpufreq.h>
 #include <trace/events/power.h>
 #include <linux/sched/sysctl.h>
+#include <linux/oplus_sched_assist.h>
 
 struct sugov_tunables {
 	struct gov_attr_set	attr_set;
@@ -385,12 +386,20 @@ unsigned long schedutil_cpu_util(int cpu, unsigned long util_cfs,
 	 * frequency will be gracefully reduced with the utilization decay.
 	 */
 	util = util_cfs + cpu_util_rt(rq);
-	if (type == FREQUENCY_UTIL)
+	if (type == FREQUENCY_UTIL) {
 #ifdef CONFIG_SCHED_TUNE
 		util += schedtune_cpu_margin_with(util, cpu, p);
-#else
+#endif
+#ifdef CONFIG_UCLAMP_TASK
 		util = uclamp_rq_util_with(rq, util, p);
 #endif
+		if (p) {
+			unsigned long ux_min = oplus_ux_min_util(p);
+
+			if (ux_min > util)
+				util = ux_min;
+		}
+	}
 
 	dl_util = cpu_util_dl(rq);
 
@@ -1256,7 +1265,8 @@ static int sugov_init(struct cpufreq_policy *policy)
 		goto stop_kthread;
 	}
 
-	tunables->up_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
+	/* Fast ramp-up (500us) for 120Hz responsiveness; stock down-rate keeps idle cool */
+	tunables->up_rate_limit_us = 500;
 	tunables->down_rate_limit_us = cpufreq_policy_transition_delay_us(policy);
 	tunables->hispeed_load = DEFAULT_HISPEED_LOAD;
 	tunables->hispeed_freq = 0;

@@ -72,6 +72,7 @@
 #include <linux/security.h>
 #include <linux/spinlock.h>
 #include <linux/ratelimit.h>
+#include <linux/oplus_sched_assist.h>
 
 #ifdef CONFIG_MILLET
 #include <linux/millet.h>
@@ -1281,6 +1282,8 @@ static void binder_set_priority(struct task_struct *task,
 static void binder_restore_priority(struct task_struct *task,
 				    struct binder_priority desired)
 {
+	if (unlikely(oplus_test_inherit_ux(task, INHERIT_UX_BINDER)))
+		oplus_unset_inherit_ux(task, INHERIT_UX_BINDER);
 	binder_do_set_priority(task, desired, /* verify = */ false);
 }
 
@@ -1293,6 +1296,10 @@ static void binder_transaction_priority(struct task_struct *task,
 
 	if (t->set_priority_called)
 		return;
+
+	if (oplus_binder_ux_enabled() && t->from && t->from->task &&
+	    oplus_is_ux_task(t->from->task))
+		oplus_set_inherit_ux(task, INHERIT_UX_BINDER);
 
 	t->set_priority_called = true;
 	t->saved_priority.sched_policy = task->policy;
@@ -3013,6 +3020,10 @@ static int binder_proc_transaction(struct binder_transaction *t,
 		if (!oneway)
     			binder_thread_set_inherit_top_app(thread, t->from);
 #endif
+		if (thread->task && oplus_is_ux_task(current) &&
+		    ((!oneway && oplus_binder_ux_enabled()) ||
+		     (oneway && oplus_binder_async_ux_enabled())))
+			oplus_set_inherit_ux(thread->task, INHERIT_UX_BINDER);
 
 		binder_transaction_priority(thread->task, t, node_prio,
 					    node->inherit_rt);

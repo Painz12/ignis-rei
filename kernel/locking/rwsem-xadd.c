@@ -285,6 +285,18 @@ __rwsem_down_read_failed_common(struct rw_semaphore *sem, int state)
 			raw_spin_unlock_irq(&sem->wait_lock);
 			break;
 		}
+#ifdef CONFIG_RWSEM_SPIN_ON_OWNER
+		if (unlikely(oplus_is_ux_task(current))) {
+			struct task_struct *owner;
+
+			rcu_read_lock();
+			owner = READ_ONCE(sem->owner);
+			if (owner && !rwsem_has_anonymous_owner(owner) &&
+			    owner != current)
+				oplus_set_inherit_ux(owner, INHERIT_UX_RWSEM);
+			rcu_read_unlock();
+		}
+#endif
 		schedule();
 	}
 
@@ -587,6 +599,18 @@ __rwsem_down_write_failed_common(struct rw_semaphore *sem, int state)
 			if (signal_pending_state(state, current))
 				goto out_nolock;
 
+#ifdef CONFIG_RWSEM_SPIN_ON_OWNER
+			if (unlikely(oplus_is_ux_task(current))) {
+				struct task_struct *owner;
+
+				rcu_read_lock();
+				owner = READ_ONCE(sem->owner);
+				if (owner && !rwsem_has_anonymous_owner(owner) &&
+				    owner != current)
+					oplus_set_inherit_ux(owner, INHERIT_UX_RWSEM);
+				rcu_read_unlock();
+			}
+#endif
 			schedule();
 			set_current_state(state);
 		} while ((count = atomic_long_read(&sem->count)) & RWSEM_ACTIVE_MASK);

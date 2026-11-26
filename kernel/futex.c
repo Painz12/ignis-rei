@@ -68,6 +68,7 @@
 #include <linux/freezer.h>
 #include <linux/bootmem.h>
 #include <linux/fault-inject.h>
+#include <linux/oplus_sched_assist.h>
 
 #include <asm/futex.h>
 
@@ -1622,6 +1623,8 @@ static int wake_futex_pi(u32 __user *uaddr, u32 uval, struct futex_pi_state *pi_
 		 * not fail.
 		 */
 		pi_state_update_owner(pi_state, new_owner);
+		if (unlikely(oplus_test_inherit_ux(current, INHERIT_UX_FUTEX)))
+			oplus_unset_inherit_ux(current, INHERIT_UX_FUTEX);
 		postunlock = __rt_mutex_futex_unlock(&pi_state->pi_mutex, &wake_q);
 	}
 
@@ -2349,6 +2352,8 @@ static inline void __queue_me(struct futex_q *q, struct futex_hash_bucket *hb)
 	 * the others are woken last, in FIFO order.
 	 */
 	prio = min(current->normal_prio, MAX_RT_PRIO);
+	if (prio >= MAX_RT_PRIO && !oplus_is_ux_task(current))
+		prio = MAX_RT_PRIO + 1;
 
 	plist_node_init(&q->list, prio);
 	plist_add(&q->list, &hb->chain);
@@ -3005,6 +3010,9 @@ retry_private:
 	 * it sees the futex_q::pi_state.
 	 */
 	ret = __rt_mutex_start_proxy_lock(&q.pi_state->pi_mutex, &rt_waiter, current);
+	if (!ret && unlikely(oplus_is_ux_task(current)) &&
+	    q.pi_state->owner && q.pi_state->owner != current)
+		oplus_set_inherit_ux(q.pi_state->owner, INHERIT_UX_FUTEX);
 	raw_spin_unlock_irq(&q.pi_state->pi_mutex.wait_lock);
 
 	if (ret) {

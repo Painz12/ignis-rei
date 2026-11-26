@@ -1530,7 +1530,11 @@ struct task_struct {
 #else
 	ANDROID_KABI_RESERVE(7);
 #endif
+#ifdef CONFIG_OPLUS_SCHED_ASSIST
+	ANDROID_KABI_USE(8, struct { u32 oplus_ux_state; u32 oplus_ux_depth; });
+#else
 	ANDROID_KABI_RESERVE(8);
+#endif
 
 	/*
 	 * New fields for task_struct should be added above here, so that

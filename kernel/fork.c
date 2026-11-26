@@ -1894,6 +1894,10 @@ static __latent_entropy struct task_struct *copy_process(
 		goto fork_out;
 
 	cpufreq_task_times_init(p);
+#ifdef CONFIG_OPLUS_SCHED_ASSIST
+	p->oplus_ux_state = 0;
+	p->oplus_ux_depth = 0;
+#endif
 
 	/*
 	 * This _must_ happen before we call free_task(), i.e. before we jump
