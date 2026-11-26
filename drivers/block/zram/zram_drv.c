@@ -34,6 +34,8 @@
 #include <linux/debugfs.h>
 #include <linux/cpuhotplug.h>
 
+#include <linux/mm.h>
+#include <linux/swap.h>
 #include "zram_drv.h"
 
 static DEFINE_IDR(zram_index_idr);
@@ -1849,10 +1851,9 @@ static ssize_t disksize_store(struct device *dev,
 	if (!disksize)
 		return -EINVAL;
 
-	/* Ignis-Rei: Enforce optimal 4GB ZRAM size and LZ4 compression */
-	disksize = 4ULL * 1024 * 1024 * 1024;
-	if (!strcmp(zram->compressor, "lzo"))
-		strlcpy(zram->compressor, "lz4", sizeof(zram->compressor));
+	/* Ignis-Rei: Enforce 3GB ZRAM size and LZ4 compression */
+	disksize = 3ULL * 1024 * 1024 * 1024;
+	strlcpy(zram->compressor, "lz4", sizeof(zram->compressor));
 
 	down_write(&zram->init_lock);
 	if (init_done(zram)) {
@@ -1979,7 +1980,75 @@ static DEVICE_ATTR_RW(use_dedup);
 static DEVICE_ATTR_RO(use_dedup);
 #endif
 
+
+static ssize_t hybridswap_meminfo_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	unsigned long avail = si_mem_available();
+	unsigned long total = totalram_pages;
+	unsigned long swap_free = 0;
+	unsigned long swap_total = 0;
+
+#ifdef CONFIG_SWAP
+	swap_free = get_nr_swap_pages();
+	swap_total = total_swap_pages;
+#endif
+
+	return scnprintf(buf, PAGE_SIZE,
+		"AnonTarget:        0 kB\n"
+		"ZramTarget:        0 kB\n"
+		"MemAvailable: %8lu kB\n"
+		"MemTotal:     %8lu kB\n"
+		"SwapFree:     %8lu kB\n"
+		"SwapTotal:    %8lu kB\n",
+		avail * (PAGE_SIZE / 1024),
+		total * (PAGE_SIZE / 1024),
+		swap_free * (PAGE_SIZE / 1024),
+		swap_total * (PAGE_SIZE / 1024));
+}
+static DEVICE_ATTR_RO(hybridswap_meminfo);
+
+static ssize_t hybridswap_stat_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "0 0 0 0 0 0 0 0\n");
+}
+static DEVICE_ATTR_RO(hybridswap_stat);
+
+static int hybridswap_enable_val;
+static ssize_t hybridswap_enable_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%d\n", hybridswap_enable_val);
+}
+static ssize_t hybridswap_enable_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	kstrtoint(buf, 10, &hybridswap_enable_val);
+	return len;
+}
+static DEVICE_ATTR_RW(hybridswap_enable);
+
+static char hybridswap_para_buf[128] = "0 0 0 0";
+static ssize_t hybridswap_zram_para_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE, "%s\n", hybridswap_para_buf);
+}
+static ssize_t hybridswap_zram_para_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	strlcpy(hybridswap_para_buf, buf, sizeof(hybridswap_para_buf));
+	return len;
+}
+static DEVICE_ATTR_RW(hybridswap_zram_para);
+
 static struct attribute *zram_disk_attrs[] = {
+	&dev_attr_hybridswap_meminfo.attr,
+	&dev_attr_hybridswap_stat.attr,
+	&dev_attr_hybridswap_enable.attr,
+	&dev_attr_hybridswap_zram_para.attr,
+
 	&dev_attr_disksize.attr,
 	&dev_attr_initstate.attr,
 	&dev_attr_reset.attr,

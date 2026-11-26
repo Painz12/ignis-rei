@@ -69,6 +69,7 @@
 #include <linux/nmi.h>
 #include <linux/khugepaged.h>
 #include <linux/psi.h>
+#include <linux/oplus_sched_assist.h>
 
 #include <asm/sections.h>
 #include <asm/tlbflush.h>
@@ -4360,6 +4361,9 @@ gfp_to_alloc_flags(gfp_t gfp_mask)
 		 */
 		alloc_flags &= ~ALLOC_CPUSET;
 	} else if (unlikely(rt_task(current)) && !in_interrupt())
+		alloc_flags |= ALLOC_HARDER;
+	else if (unlikely(oplus_uxmem_opt_enabled() &&
+			  oplus_is_ux_task(current)) && !in_interrupt())
 		alloc_flags |= ALLOC_HARDER;
 
 	if (gfp_mask & __GFP_KSWAPD_RECLAIM)

@@ -257,8 +257,8 @@ static void ufshcd_update_uic_error_cnt(struct ufs_hba *hba, u32 reg, int type)
 /* default value of ref clock gating wait time is 100 micro seconds */
 #define UFSHCD_REF_CLK_GATING_WAIT_US 100 /* microsecs */
 
-#define UFSHCD_CLK_GATING_DELAY_MS_PWR_SAVE	10
-#define UFSHCD_CLK_GATING_DELAY_MS_PERF		50
+#define UFSHCD_CLK_GATING_DELAY_MS_PWR_SAVE	50
+#define UFSHCD_CLK_GATING_DELAY_MS_PERF		150
 
 /* IOCTL opcode for command - ufs set device read only */
 #define UFS_IOCTL_BLKROSET      BLKROSET
@@ -1816,7 +1816,7 @@ static int ufshcd_devfreq_scale(struct ufs_hba *hba, bool scale_up)
 
 	/* Enable Write Booster if we have scaled up else disable it */
 	up_write(&hba->lock);
-	ufshcd_wb_ctrl(hba, scale_up);
+	ufshcd_wb_ctrl(hba, true);
 	down_write(&hba->lock);
 	goto clk_scaling_unprepare;
 

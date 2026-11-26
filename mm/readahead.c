@@ -21,6 +21,7 @@
 #include <linux/mm_inline.h>
 #include <linux/blk-cgroup.h>
 #include <linux/fadvise.h>
+#include <linux/oplus_sched_assist.h>
 
 #include "internal.h"
 
@@ -386,7 +387,7 @@ ondemand_readahead(struct address_space *mapping,
 		   unsigned long req_size)
 {
 	struct backing_dev_info *bdi = inode_to_bdi(mapping->host);
-	unsigned long max_pages = ra->ra_pages;
+	unsigned long max_pages = oplus_dynamic_readahead_pages(current, ra->ra_pages);
 	unsigned long add_pages;
 	pgoff_t prev_offset;
 

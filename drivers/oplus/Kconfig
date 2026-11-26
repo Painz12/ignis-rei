@@ -77,3 +77,20 @@ config OPLUS_STUB_NODES
 	default y
 	help
 	  Select this to enable dummy stubs for missing oplus procfs and sysfs nodes.
+
+config OPLUS_SCHED_ASSIST
+	bool "OPlus Sched Assist, 120Hz Frame Boost, Binder/Lock UX & SurfaceFlinger Sync"
+	depends on OPLUS_PORT || E404_OPLUS
+	default y
+	help
+	  Real UX task scheduling, 120Hz frame_boost, foreground UID tracking,
+	  binder/mutex/rwsem/futex lock-holder UX inheritance, /proc/oplus_uc,
+	  for Android 11-17 and ColorOS/OxygenOS.
+
+config OPLUS_MM_OPT
+	bool "OPlus MM Smoothness Pack (Readahead, UXMem, Proactive Compact, ERM, SIGKILL)"
+	depends on OPLUS_PORT || E404_OPLUS
+	default y
+	help
+	  Dynamic readahead, UX allocation reserve priority, async proactive
+	  compaction, ERM free_boost_kb, dynamic swappiness, and SIGKILL diagnosis.

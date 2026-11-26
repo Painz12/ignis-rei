@@ -3985,8 +3985,21 @@ static int kswapd(void *p)
 	};
 	const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id);
 
-	if (!cpumask_empty(cpumask))
-		set_cpus_allowed_ptr(tsk, cpumask);
+	if (!cpumask_empty(cpumask)) {
+		/* kswapd_opt: keep kswapd off prime core (CPU 7) to avoid 120Hz frame stalls */
+		if (nr_cpu_ids > 4) {
+			cpumask_t kswapd_mask;
+
+			cpumask_copy(&kswapd_mask, cpumask);
+			cpumask_clear_cpu(nr_cpu_ids - 1, &kswapd_mask);
+			if (!cpumask_empty(&kswapd_mask))
+				set_cpus_allowed_ptr(tsk, &kswapd_mask);
+			else
+				set_cpus_allowed_ptr(tsk, cpumask);
+		} else {
+			set_cpus_allowed_ptr(tsk, cpumask);
+		}
+	}
 	current->reclaim_state = &reclaim_state;
 
 	/*

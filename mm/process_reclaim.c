@@ -12,6 +12,7 @@
 #include <linux/rcupdate.h>
 #include <linux/notifier.h>
 #include <linux/vmpressure.h>
+#include <linux/oplus_sched_assist.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/process_reclaim.h>
@@ -22,7 +23,7 @@ static void swap_fn(struct work_struct *work);
 DECLARE_WORK(swap_work, swap_fn);
 
 /* User knob to enable/disable process reclaim feature */
-static int enable_process_reclaim;
+static int enable_process_reclaim = 1;
 module_param_named(enable_process_reclaim, enable_process_reclaim, int, 0644);
 
 /* The max number of pages tried to be reclaimed in a single run */
@@ -129,6 +130,9 @@ static void swap_fn(struct work_struct *work)
 		short oom_score_adj;
 
 		if (tsk->flags & PF_KTHREAD)
+			continue;
+
+		if (oplus_is_ux_task(tsk) || oplus_is_fg_task(tsk))
 			continue;
 
 		if (test_task_flag(tsk, TIF_MEMDIE))

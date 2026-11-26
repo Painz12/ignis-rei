@@ -9,4 +9,6 @@ obj-$(CONFIG_OPLUS_SUBSYS_SLEEP_MONITOR)	+= oplus_subsys_sleep_monitor.o
 obj-$(CONFIG_OPLUS_NWPOWER) += oplus_nwpower.o oplus_ipv6_rto.o
 obj-$(CONFIG_OPLUS_STUB_NODES)	+= oplus_stub_nodes.o
 obj-$(CONFIG_OPLUS_HANS)	+= oplus_hans.o
+obj-$(CONFIG_OPLUS_SCHED_ASSIST) += oplus_sched_assist.o
+obj-$(CONFIG_OPLUS_MM_OPT)	+= oplus_mm_opt.o
 endif
