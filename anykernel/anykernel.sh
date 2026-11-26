@@ -226,6 +226,33 @@ chmod 666 /sys/class/oplus_chg/*/* 2>/dev/null
 pm disable com.oplus.audio.dolbyservice 2>/dev/null || true
 settings put global hidden_api_policy 1 2>/dev/null || true
 
+# Post-boot tuning service for KernelSU/Magisk/APatch (ensures uclamp & vm.page-cluster persistence)
+if [ -d /data/adb/service.d ]; then
+    cat << 'EOF_POSTBOOT' > /data/adb/service.d/99-ignis-rei.sh
+#!/system/bin/sh
+while [ "$(getprop sys.boot_completed)" != "1" ]; do
+    sleep 2
+done
+sleep 3
+for p in /sys/devices/system/cpu/cpufreq/policy*/schedutil/down_rate_limit_us; do
+    [ -f "$p" ] && echo 5000 > "$p" 2>/dev/null
+done
+[ -f /dev/cpuctl/top-app/cpu.uclamp.min ] && echo 10 > /dev/cpuctl/top-app/cpu.uclamp.min 2>/dev/null
+[ -f /dev/cpuctl/top-app/cpu.uclamp.latency_sensitive ] && echo 1 > /dev/cpuctl/top-app/cpu.uclamp.latency_sensitive 2>/dev/null
+sysctl -w vm.page-cluster=0 2>/dev/null || true
+EOF_POSTBOOT
+    chmod 755 /data/adb/service.d/99-ignis-rei.sh
+fi
+
+if [ "$BOOTMODE" = "true" ]; then
+    for p in /sys/devices/system/cpu/cpufreq/policy*/schedutil/down_rate_limit_us; do
+        [ -f "$p" ] && echo 5000 > "$p" 2>/dev/null
+    done
+    [ -f /dev/cpuctl/top-app/cpu.uclamp.min ] && echo 10 > /dev/cpuctl/top-app/cpu.uclamp.min 2>/dev/null
+    [ -f /dev/cpuctl/top-app/cpu.uclamp.latency_sensitive ] && echo 1 > /dev/cpuctl/top-app/cpu.uclamp.latency_sensitive 2>/dev/null
+    sysctl -w vm.page-cluster=0 2>/dev/null || true
+fi
+
 
 ui_print " ";
 ui_print "  ===========================================";

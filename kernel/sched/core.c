@@ -7844,6 +7844,9 @@ static int cpu_cgroup_css_online(struct cgroup_subsys_state *css)
 		sched_online_group(tg, parent);
 
 #ifdef CONFIG_UCLAMP_TASK_GROUP
+	if (css->cgroup && css->cgroup->kn && !strcmp(css->cgroup->kn->name, "top-app"))
+		tg->latency_sensitive = 1;
+
 	/* Propagate the effective uclamp value for the new group */
 	mutex_lock(&uclamp_mutex);
 	rcu_read_lock();
