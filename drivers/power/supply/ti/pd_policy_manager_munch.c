@@ -948,8 +948,8 @@ static void usbpd_pm_evaluate_src_caps(struct usbpd_pm *pdpm)
 			pdpm->apdo_max_curr);
 		if (pdpm->apdo_max_curr <= LOW_POWER_PPS_CURR_THR)
 			pdpm->apdo_max_curr = XIAOMI_LOW_POWER_PPS_CURR_MAX;
-		pval.intval = (pdpm->apdo_max_volt / 1000) *
-			      (pdpm->apdo_max_curr / 1000);
+		/* Avoid /1000 integer truncation (e.g. 11000mV * 6100mA = 67W, not 66W) */
+		pval.intval = (pdpm->apdo_max_volt * pdpm->apdo_max_curr) / 1000000;
 		power_supply_set_property(pdpm->usb_psy,
 					  POWER_SUPPLY_PROP_APDO_MAX, &pval);
 	} else {

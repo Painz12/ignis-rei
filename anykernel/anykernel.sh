@@ -240,6 +240,19 @@ done
 [ -f /dev/cpuctl/top-app/cpu.uclamp.min ] && echo 10 > /dev/cpuctl/top-app/cpu.uclamp.min 2>/dev/null
 [ -f /dev/cpuctl/top-app/cpu.uclamp.latency_sensitive ] && echo 1 > /dev/cpuctl/top-app/cpu.uclamp.latency_sensitive 2>/dev/null
 sysctl -w vm.page-cluster=0 2>/dev/null || true
+sysctl -w vm.swappiness=100 2>/dev/null || true
+sysctl -w vm.vfs_cache_pressure=60 2>/dev/null || true
+sysctl -w vm.dirty_background_ratio=5 2>/dev/null || true
+sysctl -w vm.dirty_ratio=15 2>/dev/null || true
+sysctl -w vm.watermark_boost_factor=0 2>/dev/null || true
+sysctl -w vm.watermark_scale_factor=150 2>/dev/null || true
+sysctl -w vm.min_free_kbytes=65536 2>/dev/null || true
+chmod 666 /proc/oplus_scheduler/sched_assist/* 2>/dev/null || true
+chmod 666 /proc/oplus_scheduler/sched_assist/audio/* 2>/dev/null || true
+chmod 666 /proc/oplus_frame_boost/* 2>/dev/null || true
+chmod 666 /proc/fg_uid/* 2>/dev/null || true
+chmod 666 /proc/oplus_uc/* 2>/dev/null || true
+chmod 666 /sys/class/oplus_chg/*/* 2>/dev/null || true
 EOF_POSTBOOT
     chmod 755 /data/adb/service.d/99-ignis-rei.sh
 fi
@@ -251,6 +264,18 @@ if [ "$BOOTMODE" = "true" ]; then
     [ -f /dev/cpuctl/top-app/cpu.uclamp.min ] && echo 10 > /dev/cpuctl/top-app/cpu.uclamp.min 2>/dev/null
     [ -f /dev/cpuctl/top-app/cpu.uclamp.latency_sensitive ] && echo 1 > /dev/cpuctl/top-app/cpu.uclamp.latency_sensitive 2>/dev/null
     sysctl -w vm.page-cluster=0 2>/dev/null || true
+    sysctl -w vm.swappiness=100 2>/dev/null || true
+    sysctl -w vm.vfs_cache_pressure=60 2>/dev/null || true
+    sysctl -w vm.dirty_background_ratio=5 2>/dev/null || true
+    sysctl -w vm.dirty_ratio=15 2>/dev/null || true
+sysctl -w vm.watermark_boost_factor=0 2>/dev/null || true
+sysctl -w vm.watermark_scale_factor=150 2>/dev/null || true
+sysctl -w vm.min_free_kbytes=65536 2>/dev/null || true
+    chmod 666 /proc/oplus_scheduler/sched_assist/* 2>/dev/null || true
+    chmod 666 /proc/oplus_scheduler/sched_assist/audio/* 2>/dev/null || true
+    chmod 666 /proc/oplus_frame_boost/* 2>/dev/null || true
+    chmod 666 /proc/fg_uid/* 2>/dev/null || true
+    chmod 666 /proc/oplus_uc/* 2>/dev/null || true
 fi
 
 

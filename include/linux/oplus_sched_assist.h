@@ -49,7 +49,11 @@ static inline bool oplus_is_ux_task(struct task_struct *p)
 {
 	if (!p || !READ_ONCE(oplus_sched_assist_enabled))
 		return false;
-	return (READ_ONCE(p->oplus_ux_state) & (SA_TYPE_MASK | SA_INHERIT_MASK)) != 0;
+	if ((READ_ONCE(p->oplus_ux_state) & (SA_TYPE_MASK | SA_INHERIT_MASK)) != 0)
+		return true;
+	if (p->group_leader && (READ_ONCE(p->group_leader->oplus_ux_state) & (SA_TYPE_MASK | SA_INHERIT_MASK)) != 0)
+		return true;
+	return false;
 }
 
 static inline bool oplus_test_inherit_ux(struct task_struct *p, int type)

@@ -1981,7 +1981,7 @@ static int ufshcd_devfreq_init(struct ufs_hba *hba)
 	dev_pm_opp_add(hba->dev, clki->min_freq, 0);
 	dev_pm_opp_add(hba->dev, clki->max_freq, 0);
 
-	scaling->profile.polling_ms = 60;
+	scaling->profile.polling_ms = 16;
 	scaling->profile.target = ufshcd_devfreq_target;
 	scaling->profile.get_dev_status = ufshcd_devfreq_get_dev_status;
 

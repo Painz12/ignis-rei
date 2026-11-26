@@ -98,6 +98,9 @@
 #include <trace/events/oom.h>
 #include "internal.h"
 #include "fd.h"
+#ifdef CONFIG_OPLUS_SCHED_ASSIST
+#include <linux/oplus_sched_assist.h>
+#endif
 
 #include "../../lib/kstrtox.h"
 
@@ -1225,6 +1228,51 @@ static const struct file_operations proc_oom_score_adj_operations = {
 	.write		= oom_score_adj_write,
 	.llseek		= default_llseek,
 };
+
+#ifdef CONFIG_OPLUS_SCHED_ASSIST
+static ssize_t proc_pid_ux_state_read(struct file *file, char __user *buf,
+				      size_t count, loff_t *ppos)
+{
+	struct task_struct *task = get_proc_task(file_inode(file));
+	char buffer[PROC_NUMBUF];
+	size_t len;
+	u32 state = 0;
+
+	if (!task)
+		return -ESRCH;
+	state = READ_ONCE(task->oplus_ux_state);
+	put_task_struct(task);
+	len = snprintf(buffer, sizeof(buffer), "%u\n", state);
+	return simple_read_from_buffer(buf, count, ppos, buffer, len);
+}
+
+static ssize_t proc_pid_ux_state_write(struct file *file, const char __user *buf,
+				       size_t count, loff_t *ppos)
+{
+	struct task_struct *task = get_proc_task(file_inode(file));
+	u32 val;
+	int err;
+
+	if (!task)
+		return -ESRCH;
+
+	err = kstrtouint_from_user(buf, count, 0, &val);
+	if (err < 0) {
+		put_task_struct(task);
+		return err;
+	}
+
+	oplus_set_ux_state(task, val);
+	put_task_struct(task);
+	return count;
+}
+
+static const struct file_operations proc_pid_ux_state_operations = {
+	.read		= proc_pid_ux_state_read,
+	.write		= proc_pid_ux_state_write,
+	.llseek		= default_llseek,
+};
+#endif
 
 #ifdef CONFIG_AUDITSYSCALL
 #define TMPBUFLEN 11
@@ -3495,6 +3543,9 @@ static const struct pid_entry tgid_base_stuff[] = {
 	ONE("oom_score",  S_IRUGO, proc_oom_score),
 	REG("oom_adj",    S_IRUGO|S_IWUSR, proc_oom_adj_operations),
 	REG("oom_score_adj", S_IRUGO|S_IWUSR, proc_oom_score_adj_operations),
+#ifdef CONFIG_OPLUS_SCHED_ASSIST
+	REG("ux_state", 0666, proc_pid_ux_state_operations),
+#endif
 #ifdef CONFIG_AUDITSYSCALL
 	REG("loginuid",   S_IWUSR|S_IRUGO, proc_loginuid_operations),
 	REG("sessionid",  S_IRUGO, proc_sessionid_operations),
@@ -3897,6 +3948,9 @@ static const struct pid_entry tid_base_stuff[] = {
 	ONE("oom_score", S_IRUGO, proc_oom_score),
 	REG("oom_adj",   S_IRUGO|S_IWUSR, proc_oom_adj_operations),
 	REG("oom_score_adj", S_IRUGO|S_IWUSR, proc_oom_score_adj_operations),
+#ifdef CONFIG_OPLUS_SCHED_ASSIST
+	REG("ux_state", 0666, proc_pid_ux_state_operations),
+#endif
 #ifdef CONFIG_AUDITSYSCALL
 	REG("loginuid",  S_IWUSR|S_IRUGO, proc_loginuid_operations),
 	REG("sessionid",  S_IRUGO, proc_sessionid_operations),

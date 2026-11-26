@@ -40,6 +40,7 @@ int oplus_uclamp_boost_min = 0;
 
 /* Runtime state */
 static int sa_scene;
+static int sa_sched_prop_val;
 static int sa_opt_enable = 1;
 static int sa_inherit_ux = 1;
 static int sa_sched_fbg_opt = 1;
@@ -157,6 +158,7 @@ EXPORT_SYMBOL_GPL(oplus_unset_inherit_ux);
 bool oplus_is_fg_uid(uid_t uid)
 {
 	int i, cnt;
+	uid_t appid;
 
 	if (uid == 0)
 		return false;
@@ -167,8 +169,14 @@ bool oplus_is_fg_uid(uid_t uid)
 	if (cnt > MAX_FG_UIDS)
 		cnt = MAX_FG_UIDS;
 
+	appid = (uid >= 10000) ? (uid % 100000) : uid;
+
 	for (i = 0; i < cnt; i++) {
-		if (READ_ONCE(fg_uids[i]) == uid)
+		uid_t fg = READ_ONCE(fg_uids[i]);
+		if (fg == uid)
+			return true;
+		/* Match secondary users / clone apps (e.g. user 999 in ColorOS multi-app) */
+		if (fg >= 10000 && (fg % 100000) == appid)
 			return true;
 	}
 	return false;
@@ -197,6 +205,16 @@ static inline bool is_critical_ui_thread(struct task_struct *p)
 		return true;
 	if (c0 == 'S' && !strncmp(p->comm, "SurfaceFlinger", 14))
 		return true;
+	if (c0 == 'H' && !strncmp(p->comm, "HwComposer", 10))
+		return true;
+	if (c0 == 'c' && !strncmp(p->comm, "composer", 8))
+		return true;
+	if (c0 == 'c' && !strncmp(p->comm, "cr_renderer", 11))
+		return true;
+	if (c0 == 'C' && !strncmp(p->comm, "Chrome_InProcRe", 15))
+		return true;
+	if (c0 == 'U' && !strncmp(p->comm, "UnityMain", 9))
+		return true;
 	return false;
 }
 
@@ -210,6 +228,8 @@ unsigned long oplus_ux_min_util(struct task_struct *p)
 		return 0;
 
 	state = READ_ONCE(p->oplus_ux_state);
+	if (!state && p->group_leader)
+		state = READ_ONCE(p->group_leader->oplus_ux_state);
 	if (!state) {
 		/*
 		 * Even if userspace didn't tag SurfaceFlinger/RenderThread yet
@@ -614,11 +634,21 @@ static struct ctl_table fbg_sysctl_table[] = {
 	{ }
 };
 
+static struct ctl_table sched_assist_kernel_table[] = {
+	FBG_SYSCTL_INT("sched_assist_scene", sa_scene),
+	{ }
+};
+
 static struct ctl_table fbg_sysctl_root[] = {
 	{
 		.procname	= "fbg",
 		.mode		= 0555,
 		.child		= fbg_sysctl_table,
+	},
+	{
+		.procname	= "kernel",
+		.mode		= 0555,
+		.child		= sched_assist_kernel_table,
 	},
 	{ }
 };
@@ -662,6 +692,7 @@ static int __init oplus_sched_assist_init(void)
 			set_proc_owner(dir_sa);
 			create_int_node("sched_assist_enabled", 0666, dir_sa, &oplus_sched_assist_enabled);
 			create_int_node("sched_assist_scene", 0666, dir_sa, &sa_scene);
+			create_int_node("sched_prop", 0666, dir_sa, &sa_sched_prop_val);
 			set_proc_owner(proc_create("sched_impt_task", 0666, dir_sa, &ux_task_fops));
 			set_proc_owner(proc_create("im_flag_app", 0666, dir_sa, &ux_task_fops));
 			set_proc_owner(proc_create("im_flag", 0666, dir_sa, &ux_task_fops));

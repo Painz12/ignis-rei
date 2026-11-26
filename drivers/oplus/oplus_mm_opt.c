@@ -87,41 +87,20 @@ EXPORT_SYMBOL_GPL(oplus_uxmem_opt_enabled);
 unsigned long oplus_dynamic_readahead_pages(struct task_struct *p,
 					    unsigned long orig_max)
 {
-	long avail;
-	unsigned long total;
 	bool is_ux;
 
 	if (!READ_ONCE(dynamic_readahead_enabled) || !orig_max)
 		return orig_max;
 
-	total = totalram_pages;
-	if (unlikely(!total))
-		return orig_max;
-
-	avail = si_mem_available();
+	/*
+	 * Give UX and foreground app launches a generous 512 KB (128-page)
+	 * sequential streaming window for fast APK, DEX, and asset loads.
+	 * For all other tasks, NEVER throttle below orig_max (128 KB) so
+	 * background and newly-spawning apps never choke on tiny 32KB/64KB I/O fragments.
+	 */
 	is_ux = oplus_is_ux_task(p) || oplus_is_fg_task(p);
-
-	/*
-	 * Under healthy RAM, give UX / foreground app launches a generous
-	 * 512 KB (128-page) sequential window for fast APK/DEX/asset loads.
-	 */
-	if (is_ux && avail > (long)(total / 5))
+	if (is_ux)
 		return max(orig_max, 128UL);
-
-	/*
-	 * Under memory pressure (< 15% RAM available), curb background
-	 * readahead aggressively so background I/O doesn't evict launcher/UI
-	 * page cache or trigger direct reclaim storms.
-	 */
-	if (avail < (long)(total * 3 / 20)) {
-		if (is_ux)
-			return min(orig_max, 32UL);
-		return min(orig_max, 8UL);
-	}
-
-	/* Moderate pressure (< 25% available): trim non-UX readahead */
-	if (!is_ux && avail < (long)(total / 4))
-		return min(orig_max, 16UL);
 
 	return orig_max;
 }

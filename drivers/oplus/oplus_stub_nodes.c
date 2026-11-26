@@ -38,6 +38,17 @@ static struct kobject *oplus_display_kobj;
 
 static struct notifier_block psy_nb;
 static bool usb_attr_added = false;
+static bool batt_attr_added = false;
+static int normal_cool_down_level = 0;
+static int slow_chg_enable = 0;
+static int ship_mode_val = 0;
+static int gsm_call_val = 0;
+static int bms_heat_temp_comp = 0;
+static int oplus_boot_completed = 1;
+static int oplus_time_zone = 0;
+static int super_endurance_status = 0;
+static int super_endurance_count = 0;
+static int deep_dischg_cali = 0;
 
 #define QUICK_CHARGE_NORMAL	0
 #define QUICK_CHARGE_FAST	1
@@ -72,49 +83,174 @@ static int read_sysfs_int(const char *path, int *out_value) {
 	return 0;
 }
 
+static bool is_charger_online(void) {
+	struct power_supply *psy;
+	union power_supply_propval val = { 0 };
+	bool online = false;
+
+	psy = power_supply_get_by_name("usb");
+	if (psy) {
+		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_ONLINE, &val) && val.intval > 0)
+			online = true;
+		else if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_PRESENT, &val) && val.intval > 0)
+			online = true;
+		power_supply_put(psy);
+	}
+	if (!online) {
+		psy = power_supply_get_by_name("battery");
+		if (psy) {
+			if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &val) &&
+			    val.intval == POWER_SUPPLY_STATUS_CHARGING)
+				online = true;
+			power_supply_put(psy);
+		}
+	}
+	return online;
+}
+
 static int get_usb_type(void) {
 	struct power_supply *psy;
 	union power_supply_propval val = { 0 };
 	int usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
 
+	if (!is_charger_online())
+		return POWER_SUPPLY_USB_TYPE_UNKNOWN;
+
 	psy = power_supply_get_by_name("usb");
 	if (psy) {
-		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_USB_TYPE, &val))
+		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_USB_TYPE, &val) &&
+		    val.intval != POWER_SUPPLY_USB_TYPE_UNKNOWN) {
 			usb_type = val.intval;
+		} else if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_PD_ACTIVE, &val) &&
+			   val.intval > 0) {
+			if (val.intval == POWER_SUPPLY_PD_PPS_ACTIVE)
+				usb_type = POWER_SUPPLY_USB_TYPE_PD_PPS;
+			else
+				usb_type = POWER_SUPPLY_USB_TYPE_PD;
+		} else if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_REAL_TYPE, &val)) {
+			switch (val.intval) {
+			case POWER_SUPPLY_TYPE_USB_PD:
+				usb_type = POWER_SUPPLY_USB_TYPE_PD;
+				break;
+			case POWER_SUPPLY_TYPE_USB_HVDCP_3P5:
+				usb_type = POWER_SUPPLY_USB_TYPE_PD_PPS;
+				break;
+			case POWER_SUPPLY_TYPE_USB_HVDCP:
+			case POWER_SUPPLY_TYPE_USB_HVDCP_3:
+			case POWER_SUPPLY_TYPE_USB_DCP:
+				usb_type = POWER_SUPPLY_USB_TYPE_DCP;
+				break;
+			case POWER_SUPPLY_TYPE_USB_CDP:
+				usb_type = POWER_SUPPLY_USB_TYPE_CDP;
+				break;
+			case POWER_SUPPLY_TYPE_USB:
+				usb_type = POWER_SUPPLY_USB_TYPE_SDP;
+				break;
+			default:
+				break;
+			}
+		}
 		power_supply_put(psy);
 	}
 	return usb_type;
 }
 
+static int get_adapter_power_w(void) {
+	struct power_supply *psy;
+	union power_supply_propval val = { 0 };
+	int power_w = 0;
+
+	if (!is_charger_online())
+		return 0;
+
+	psy = power_supply_get_by_name("usb");
+	if (psy) {
+		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_POWER_MAX, &val) && val.intval > 0)
+			power_w = val.intval;
+		else if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_APDO_MAX, &val) && val.intval > 0)
+			power_w = val.intval;
+
+		/* Convert if driver reported mW instead of W */
+		if (power_w > 1000)
+			power_w /= 1000;
+
+		/* Fallback detection via SMB5 fastcharge_mode / quick_charge_type / PD caps */
+		if (power_w <= 0) {
+			union power_supply_propval v_uv = { 0 }, i_ua = { 0 };
+
+			if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_FASTCHARGE_MODE, &val) &&
+			    val.intval > 0) {
+				power_w = 67;
+			} else if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_PD_VOLTAGE_MAX, &v_uv) &&
+				   !power_supply_get_property(psy, POWER_SUPPLY_PROP_PD_CURRENT_MAX, &i_ua) &&
+				   v_uv.intval > 0 && i_ua.intval > 0) {
+				u64 uw = (u64)v_uv.intval * (u64)i_ua.intval;
+				power_w = (int)(uw / 1000000000000ULL);
+			}
+
+			if (power_w <= 0 &&
+			    !power_supply_get_property(psy, POWER_SUPPLY_PROP_QUICK_CHARGE_TYPE, &val)) {
+				switch (val.intval) {
+				case 3: /* QUICK_CHARGE_TURBE (Xiaomi 67W) */
+				case 4: /* QUICK_CHARGE_SUPER */
+					power_w = 67;
+					break;
+				case 2: /* QUICK_CHARGE_FLASH (27W / 33W) */
+					power_w = 33;
+					break;
+				case 1: /* QUICK_CHARGE_FAST (18W QC/PD) */
+					power_w = 18;
+					break;
+				default:
+					break;
+				}
+			}
+
+			if (power_w <= 0 &&
+			    !power_supply_get_property(psy, POWER_SUPPLY_PROP_REAL_TYPE, &val)) {
+				if (val.intval == POWER_SUPPLY_TYPE_USB_DCP ||
+				    val.intval == POWER_SUPPLY_TYPE_USB_HVDCP ||
+				    val.intval == POWER_SUPPLY_TYPE_USB_HVDCP_3)
+					power_w = 10;
+				else if (val.intval != POWER_SUPPLY_TYPE_UNKNOWN)
+					power_w = 5;
+			}
+		}
+		power_supply_put(psy);
+	}
+
+	if (power_w == 66)
+		power_w = 67;
+	else if (power_w == 90)
+		power_w = 100;
+
+	return power_w > 0 ? power_w : 0;
+}
+
 static int get_adapter_power_mw(void) {
-    struct power_supply *psy;
-    union power_supply_propval val = { 0 };
-    int power_w = 0;
-
-    psy = power_supply_get_by_name("usb");
-    if (psy) {
-        if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_POWER_MAX, &val)) {
-            power_w = val.intval;
-        }
-        power_supply_put(psy);
-    }
-
-    if (power_w > 0) {
-        if (power_w == 90) power_w = 100;
-        return power_w * 1000;
-    }
-
-    return 10000;
+	return get_adapter_power_w() * 1000;
 }
 
 static u8 get_quick_charge_type(void) {
 	int power_mw = get_adapter_power_mw();
 	int usb_type = get_usb_type();
 
-	if (power_mw >= 65000) return QUICK_CHARGE_SUPER;
+	if (power_mw >= 50000) return QUICK_CHARGE_SUPER;
+	if (power_mw >= 30000) return QUICK_CHARGE_TURBO;
+	if (power_mw >= 20000) return QUICK_CHARGE_FLASH;
 	if (power_mw >= 15000 || usb_type == POWER_SUPPLY_USB_TYPE_PD_PPS) return QUICK_CHARGE_FAST;
 
 	return QUICK_CHARGE_NORMAL;
+}
+
+static int get_oplus_charge_tech(void) {
+	int power_mw = get_adapter_power_mw();
+
+	if (power_mw >= 30000)
+		return 2; /* CHARGER_TECH_SVOOC (maps to SuperVOOC in sys_charger_config) */
+	if (power_mw >= 15000)
+		return 1; /* CHARGER_TECH_VOOC */
+	return 0;
 }
 
 static int get_protocol_code(void) {
@@ -516,19 +652,19 @@ static ssize_t fast_charge_show(struct device *dev, struct device_attribute *att
 static DEVICE_ATTR_RO(fast_charge);
 
 static ssize_t fast_chg_type_show(struct device *dev, struct device_attribute *attr, char *buf) {
-    int power_mw = get_adapter_power_mw();
-    int usb_type = get_usb_type();
-    int type = 0;
+	int power_mw = get_adapter_power_mw();
+	int usb_type = get_usb_type();
+	int type = 0;
 
-    if (power_mw >= 65000) {
-        type = 2;
-    } else if (power_mw >= 15000 || usb_type == POWER_SUPPLY_USB_TYPE_PD_PPS) {
-        type = 1;
-    } else if (usb_type == POWER_SUPPLY_USB_TYPE_PD || usb_type == POWER_SUPPLY_USB_TYPE_PD_DRP) {
-        type = 3;
-    }
+	if (power_mw >= 33000) {
+		type = 2; /* CHARGER_SUBTYPE_FASTCHG_SVOOC (33W / 65W / 67W) */
+	} else if (power_mw >= 15000 || usb_type == POWER_SUPPLY_USB_TYPE_PD_PPS) {
+		type = 1; /* CHARGER_SUBTYPE_FASTCHG_VOOC */
+	} else if (usb_type == POWER_SUPPLY_USB_TYPE_PD || usb_type == POWER_SUPPLY_USB_TYPE_PD_DRP) {
+		type = 3; /* CHARGER_SUBTYPE_PD */
+	}
 
-    return scnprintf(buf, PAGE_SIZE, "%d\n", type);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", type);
 }
 static DEVICE_ATTR_RO(fast_chg_type);
 
@@ -538,8 +674,9 @@ static ssize_t ppschg_ing_show(struct device *dev, struct device_attribute *attr
 static DEVICE_ATTR_RO(ppschg_ing);
 
 static ssize_t ppschg_power_show(struct device *dev, struct device_attribute *attr, char *buf) {
-	if (get_usb_type() != POWER_SUPPLY_USB_TYPE_PD_PPS) return scnprintf(buf, PAGE_SIZE, "0\n");
-	return scnprintf(buf, PAGE_SIZE, "%d\n", get_adapter_power_mw());
+	if (get_usb_type() != POWER_SUPPLY_USB_TYPE_PD_PPS)
+		return scnprintf(buf, PAGE_SIZE, "0\n");
+	return scnprintf(buf, PAGE_SIZE, "%d\n", get_adapter_power_w());
 }
 static DEVICE_ATTR_RO(ppschg_power);
 
@@ -573,9 +710,14 @@ static DEVICE_ATTR_RO(battery_rm);
 
 static ssize_t soh_show(struct device *dev, struct device_attribute *attr, char *buf) {
 	int soh = get_soh();
-	return scnprintf(buf, PAGE_SIZE, "%d\n", soh >= 0 ? soh : 0);
+	return scnprintf(buf, PAGE_SIZE, "%d\n", soh > 0 ? soh : 100);
 }
 static DEVICE_ATTR_RO(soh);
+
+static ssize_t battery_soh_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return soh_show(dev, attr, buf);
+}
+static DEVICE_ATTR_RO(battery_soh);
 
 static ssize_t gauge_car_c_show(struct device *dev, struct device_attribute *attr, char *buf) {
 	return soh_show(dev, attr, buf);
@@ -758,21 +900,274 @@ static DEVICE_ATTR_RO(battery_log_content);
 
 
 
+static ssize_t charge_technology_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", get_oplus_charge_tech());
+}
+static DEVICE_ATTR_RO(charge_technology);
+
+static ssize_t charger_wattage_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", get_adapter_power_w());
+}
+static DEVICE_ATTR_RO(charger_wattage);
+
+static ssize_t voocchg_ing_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", get_adapter_power_mw() >= 18000 ? 1 : 0);
+}
+static DEVICE_ATTR_RO(voocchg_ing);
+
+static ssize_t svoocchg_ing_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", get_adapter_power_mw() >= 30000 ? 1 : 0);
+}
+static DEVICE_ATTR_RO(svoocchg_ing);
+
+static ssize_t authenticate_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "1\n");
+}
+static DEVICE_ATTR_RO(authenticate);
+
+static ssize_t chargerid_volt_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(chargerid_volt);
+
+static ssize_t short_c_hw_status_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "1\n");
+}
+static DEVICE_ATTR_RO(short_c_hw_status);
+
+static ssize_t short_c_hw_feature_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "1\n");
+}
+static DEVICE_ATTR_RO(short_c_hw_feature);
+
+static ssize_t short_ic_otp_status_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "1\n");
+}
+static DEVICE_ATTR_RO(short_ic_otp_status);
+
+static ssize_t notify_code_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(notify_code);
+
+static ssize_t battery_request_poweroff_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(battery_request_poweroff);
+
+static ssize_t batt_jump_soc_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(batt_jump_soc);
+
+static ssize_t batt_cb_status_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(batt_cb_status);
+
+static ssize_t batt_fcc_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return battery_fcc_show(dev, attr, buf);
+}
+static DEVICE_ATTR_RO(batt_fcc);
+
+static ssize_t batt_rm_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return battery_rm_show(dev, attr, buf);
+}
+static DEVICE_ATTR_RO(batt_rm);
+
+static ssize_t battery_cc_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	struct power_supply *psy = power_supply_get_by_name("battery");
+	union power_supply_propval val = { 0 };
+	int cc = 0;
+
+	if (psy) {
+		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_CYCLE_COUNT, &val))
+			cc = val.intval;
+		power_supply_put(psy);
+	}
+	return scnprintf(buf, PAGE_SIZE, "%d\n", cc >= 0 ? cc : 0);
+}
+static DEVICE_ATTR_RO(battery_cc);
+
+static ssize_t batt_voltage_now_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	struct power_supply *psy = power_supply_get_by_name("battery");
+	union power_supply_propval val = { 0 };
+	int mv = 4000;
+
+	if (psy) {
+		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_VOLTAGE_NOW, &val) && val.intval > 0)
+			mv = val.intval > 100000 ? val.intval / 1000 : val.intval;
+		power_supply_put(psy);
+	}
+	return scnprintf(buf, PAGE_SIZE, "%d\n", mv);
+}
+static struct device_attribute dev_attr_batt_voltage_now = __ATTR(voltage_now, 0444, batt_voltage_now_show, NULL);
+
+static ssize_t charge_now_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	struct power_supply *psy = power_supply_get_by_name("usb");
+	union power_supply_propval val = { 0 };
+	int mv = 0;
+
+	if (psy) {
+		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_VOLTAGE_NOW, &val) && val.intval > 0)
+			mv = val.intval > 100000 ? val.intval / 1000 : val.intval;
+		power_supply_put(psy);
+	}
+	return scnprintf(buf, PAGE_SIZE, "%d\n", mv);
+}
+static DEVICE_ATTR_RO(charge_now);
+
+static ssize_t batt_current_now_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	struct power_supply *psy = power_supply_get_by_name("battery");
+	union power_supply_propval val = { 0 };
+	int ma = 0;
+
+	if (psy) {
+		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_CURRENT_NOW, &val))
+			ma = val.intval / 1000;
+		power_supply_put(psy);
+	}
+	return scnprintf(buf, PAGE_SIZE, "%d\n", ma);
+}
+static struct device_attribute dev_attr_batt_current_now = __ATTR(current_now, 0444, batt_current_now_show, NULL);
+
+static ssize_t normal_current_now_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return batt_current_now_show(dev, attr, buf);
+}
+static DEVICE_ATTR_RO(normal_current_now);
+
+static ssize_t sub_current_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(sub_current);
+
+static ssize_t voltage_min_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "3400\n");
+}
+static DEVICE_ATTR_RO(voltage_min);
+
+static ssize_t normal_cool_down_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", normal_cool_down_level);
+}
+static ssize_t normal_cool_down_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (kstrtoint(buf, 10, &val) || val < 0) return -EINVAL;
+	normal_cool_down_level = val;
+	return count;
+}
+static DEVICE_ATTR(normal_cool_down, 0664, normal_cool_down_show, normal_cool_down_store);
+
+static ssize_t slow_chg_en_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", slow_chg_enable);
+}
+static ssize_t slow_chg_en_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (!kstrtoint(buf, 10, &val))
+		slow_chg_enable = !!val;
+	return count;
+}
+static DEVICE_ATTR(slow_chg_en, 0664, slow_chg_en_show, slow_chg_en_store);
+
+static ssize_t ship_mode_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", ship_mode_val);
+}
+static ssize_t ship_mode_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (!kstrtoint(buf, 10, &val))
+		ship_mode_val = val;
+	return count;
+}
+static DEVICE_ATTR(ship_mode, 0664, ship_mode_show, ship_mode_store);
+
+static ssize_t em_mode_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static ssize_t em_mode_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	return count;
+}
+static DEVICE_ATTR(em_mode, 0664, em_mode_show, em_mode_store);
+
+static ssize_t soc_ajust_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(soc_ajust);
+
+static ssize_t pkg_name_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "none\n");
+}
+static ssize_t pkg_name_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	return count;
+}
+static DEVICE_ATTR(pkg_name, 0664, pkg_name_show, pkg_name_store);
+
+static ssize_t gsm_call_ongoing_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", gsm_call_val);
+}
+static ssize_t gsm_call_ongoing_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (!kstrtoint(buf, 10, &val))
+		gsm_call_val = !!val;
+	return count;
+}
+static DEVICE_ATTR(gsm_call_ongoing, 0664, gsm_call_ongoing_show, gsm_call_ongoing_store);
+
+static ssize_t bms_heat_temp_compensation_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", bms_heat_temp_comp);
+}
+static ssize_t bms_heat_temp_compensation_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (!kstrtoint(buf, 10, &val))
+		bms_heat_temp_comp = val;
+	return count;
+}
+static DEVICE_ATTR(bms_heat_temp_compensation, 0664, bms_heat_temp_compensation_show, bms_heat_temp_compensation_store);
+
 static struct attribute *oplus_chg_battery_attrs[] = {
 	&dev_attr_fast_charge.attr,
 	&dev_attr_fast_chg_type.attr,
+	&dev_attr_charge_technology.attr,
+	&dev_attr_charger_wattage.attr,
+	&dev_attr_voocchg_ing.attr,
+	&dev_attr_svoocchg_ing.attr,
 	&dev_attr_ppschg_ing.attr,
 	&dev_attr_ppschg_power.attr,
 	&dev_attr_battery_fcc.attr,
+	&dev_attr_batt_fcc.attr,
 	&dev_attr_battery_rm.attr,
+	&dev_attr_batt_rm.attr,
+	&dev_attr_battery_cc.attr,
 	&dev_attr_soh.attr,
+	&dev_attr_battery_soh.attr,
 	&dev_attr_gauge_car_c.attr,
 	&dev_attr_battery_notify_code.attr,
+	&dev_attr_notify_code.attr,
+	&dev_attr_authenticate.attr,
+	&dev_attr_chargerid_volt.attr,
+	&dev_attr_short_c_hw_status.attr,
+	&dev_attr_short_c_hw_feature.attr,
+	&dev_attr_short_ic_otp_status.attr,
+	&dev_attr_battery_request_poweroff.attr,
+	&dev_attr_batt_jump_soc.attr,
+	&dev_attr_batt_cb_status.attr,
+	&dev_attr_batt_voltage_now.attr,
+	&dev_attr_charge_now.attr,
+	&dev_attr_batt_current_now.attr,
+	&dev_attr_normal_current_now.attr,
+	&dev_attr_sub_current.attr,
+	&dev_attr_voltage_min.attr,
 	&dev_attr_smart_charging_enable.attr,
 	&dev_attr_charging_protect_level.attr,
 	&dev_attr_mmi_charging_enable.attr,
 	&dev_attr_input_suspend.attr,
 	&dev_attr_cool_down.attr,
+	&dev_attr_normal_cool_down.attr,
+	&dev_attr_slow_chg_en.attr,
+	&dev_attr_ship_mode.attr,
+	&dev_attr_em_mode.attr,
+	&dev_attr_soc_ajust.attr,
+	&dev_attr_pkg_name.attr,
+	&dev_attr_gsm_call_ongoing.attr,
+	&dev_attr_bms_heat_temp_compensation.attr,
 	&dev_attr_bcc_current.attr,
 	&dev_attr_design_capacity.attr,
 	&dev_attr_battery_type.attr,
@@ -789,9 +1184,47 @@ static const struct attribute_group oplus_chg_battery_group = {
 };
 
 static ssize_t usb_status_show(struct device *dev, struct device_attribute *attr, char *buf) {
-	return 0;
+	return scnprintf(buf, PAGE_SIZE, "0\n");
 }
 static DEVICE_ATTR_RO(usb_status);
+
+static ssize_t usb_online_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", is_charger_online() ? 1 : 0);
+}
+static struct device_attribute dev_attr_usb_online = __ATTR(online, 0444, usb_online_show, NULL);
+
+static ssize_t primal_type_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", get_usb_type());
+}
+static DEVICE_ATTR_RO(primal_type);
+
+static ssize_t usb_input_current_now_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	struct power_supply *psy = power_supply_get_by_name("usb");
+	union power_supply_propval val = { 0 };
+	int ma = 0;
+
+	if (psy) {
+		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_INPUT_CURRENT_NOW, &val) && val.intval > 0)
+			ma = val.intval / 1000;
+		power_supply_put(psy);
+	}
+	return scnprintf(buf, PAGE_SIZE, "%d\n", ma);
+}
+static DEVICE_ATTR(input_current_now, 0444, usb_input_current_now_show, NULL);
+
+static ssize_t typec_cc_orientation_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	struct power_supply *psy = power_supply_get_by_name("usb");
+	union power_supply_propval val = { 0 };
+	int cc = 0;
+
+	if (psy) {
+		if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_TYPEC_CC_ORIENTATION, &val))
+			cc = val.intval;
+		power_supply_put(psy);
+	}
+	return scnprintf(buf, PAGE_SIZE, "%d\n", cc);
+}
+static DEVICE_ATTR_RO(typec_cc_orientation);
 
 static ssize_t otg_online_show(struct device *dev, struct device_attribute *attr, char *buf) {
 	return scnprintf(buf, PAGE_SIZE, "0\n");
@@ -804,12 +1237,17 @@ static ssize_t otg_switch_show(struct device *dev, struct device_attribute *attr
 static ssize_t otg_switch_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
 	int val;
 	if (kstrtoint(buf, 10, &val)) return -EINVAL;
-    otg_switch = !!val;
+	otg_switch = !!val;
 	return count;
 }
 static DEVICE_ATTR(otg_switch, 0664, otg_switch_show, otg_switch_store);
 
 static struct attribute *oplus_chg_usb_attrs[] = {
+	&dev_attr_fast_chg_type.attr,
+	&dev_attr_usb_online.attr,
+	&dev_attr_primal_type.attr,
+	&dev_attr_input_current_now.attr,
+	&dev_attr_typec_cc_orientation.attr,
 	&dev_attr_usb_status.attr,
 	&dev_attr_otg_online.attr,
 	&dev_attr_otg_switch.attr,
@@ -833,6 +1271,16 @@ static ssize_t cpa_power_show(struct device *dev, struct device_attribute *attr,
 	return ui_power_show(dev, attr, buf);
 }
 static DEVICE_ATTR_RO(cpa_power);
+
+static ssize_t device_power_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "67000\n");
+}
+static DEVICE_ATTR_RO(device_power);
+
+static ssize_t vbat_pwr_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return ui_power_show(dev, attr, buf);
+}
+static DEVICE_ATTR_RO(vbat_pwr);
 
 static ssize_t plc_show(struct device *dev, struct device_attribute *attr, char *buf) {
 	return scnprintf(buf, PAGE_SIZE, "0\n");
@@ -867,57 +1315,6 @@ static ssize_t mutual_cmd_store(struct device *dev, struct device_attribute *att
 }
 static DEVICE_ATTR_RW(mutual_cmd);
 
-static ssize_t charger_wattage_show(struct device *dev, struct device_attribute *attr, char *buf) {
-    struct power_supply *psy;
-    union power_supply_propval val = { 0 };
-    int power_w = 0;
-
-    psy = power_supply_get_by_name("usb");
-    if (psy) {
-        if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_POWER_MAX, &val)) {
-            power_w = val.intval;
-        }
-        power_supply_put(psy);
-    }
-
-    return scnprintf(buf, PAGE_SIZE, "%d\n", power_w);
-}
-static DEVICE_ATTR_RO(charger_wattage);
-
-static ssize_t voocchg_ing_show(struct device *dev, struct device_attribute *attr, char *buf) {
-    struct power_supply *psy = power_supply_get_by_name("battery");
-    union power_supply_propval val = { 0 };
-    int charging = 0;
-    if (psy) {
-        if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &val)) {
-            if (val.intval == POWER_SUPPLY_STATUS_CHARGING || val.intval == POWER_SUPPLY_STATUS_FULL)
-                charging = 1;
-        }
-        power_supply_put(psy);
-    }
-    return scnprintf(buf, PAGE_SIZE, "%d\n", charging);
-}
-static DEVICE_ATTR_RO(voocchg_ing);
-
-static ssize_t svoocchg_ing_show(struct device *dev, struct device_attribute *attr, char *buf) {
-    struct power_supply *psy = power_supply_get_by_name("battery");
-    union power_supply_propval val = { 0 };
-    int fast_charging = 0;
-    if (psy) {
-        if (!power_supply_get_property(psy, POWER_SUPPLY_PROP_CHARGE_TYPE, &val)) {
-            if (val.intval == POWER_SUPPLY_CHARGE_TYPE_FAST)
-                fast_charging = 1;
-        }
-        if (!fast_charging && !power_supply_get_property(psy, POWER_SUPPLY_PROP_STATUS, &val)) {
-            if (val.intval == POWER_SUPPLY_STATUS_CHARGING)
-                fast_charging = 1;
-        }
-        power_supply_put(psy);
-    }
-    return scnprintf(buf, PAGE_SIZE, "%d\n", fast_charging);
-}
-static DEVICE_ATTR_RO(svoocchg_ing);
-
 static ssize_t svooc_100w_icon_show(struct device *dev, struct device_attribute *attr, char *buf) {
     return scnprintf(buf, PAGE_SIZE, "0\n");
 }
@@ -928,20 +1325,107 @@ static ssize_t adapter_fw_update_show(struct device *dev, struct device_attribut
 }
 static DEVICE_ATTR_RO(adapter_fw_update);
 
+static ssize_t bob_status_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(bob_status);
+
+static ssize_t bob_status_reg_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static DEVICE_ATTR_RO(bob_status_reg);
+
+static ssize_t boot_completed_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", oplus_boot_completed);
+}
+static ssize_t boot_completed_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (!kstrtoint(buf, 10, &val))
+		oplus_boot_completed = !!val;
+	return count;
+}
+static DEVICE_ATTR(boot_completed, 0664, boot_completed_show, boot_completed_store);
+
+static ssize_t time_zone_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", oplus_time_zone);
+}
+static ssize_t time_zone_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (!kstrtoint(buf, 10, &val))
+		oplus_time_zone = val;
+	return count;
+}
+static DEVICE_ATTR(time_zone, 0664, time_zone_show, time_zone_store);
+
+static ssize_t common_sink_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "0\n");
+}
+static ssize_t common_sink_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	return count;
+}
+static struct device_attribute dev_attr_chg_olc_config = __ATTR(chg_olc_config, 0664, common_sink_show, common_sink_store);
+static struct device_attribute dev_attr_battlog_push_config = __ATTR(battlog_push_config, 0664, common_sink_show, common_sink_store);
+static struct device_attribute dev_attr_track_hidl = __ATTR(track_hidl, 0664, common_sink_show, common_sink_store);
+
+static ssize_t super_endurance_mode_status_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", super_endurance_status);
+}
+static ssize_t super_endurance_mode_status_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (!kstrtoint(buf, 10, &val))
+		super_endurance_status = val;
+	return count;
+}
+static DEVICE_ATTR(super_endurance_mode_status, 0664, super_endurance_mode_status_show, super_endurance_mode_status_store);
+
+static ssize_t super_endurance_mode_count_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", super_endurance_count);
+}
+static ssize_t super_endurance_mode_count_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (!kstrtoint(buf, 10, &val))
+		super_endurance_count = val;
+	return count;
+}
+static DEVICE_ATTR(super_endurance_mode_count, 0664, super_endurance_mode_count_show, super_endurance_mode_count_store);
+
+static ssize_t deep_dischg_count_cali_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	return scnprintf(buf, PAGE_SIZE, "%d\n", deep_dischg_cali);
+}
+static ssize_t deep_dischg_count_cali_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count) {
+	int val;
+	if (!kstrtoint(buf, 10, &val))
+		deep_dischg_cali = val;
+	return count;
+}
+static DEVICE_ATTR(deep_dischg_count_cali, 0664, deep_dischg_count_cali_show, deep_dischg_count_cali_store);
+
 static struct attribute *oplus_chg_common_attrs[] = {
 	&dev_attr_protocol_type.attr,
 	&dev_attr_ui_power.attr,
 	&dev_attr_cpa_power.attr,
+	&dev_attr_device_power.attr,
+	&dev_attr_vbat_pwr.attr,
 	&dev_attr_plc.attr,
 	&dev_attr_adapter_power.attr,
 	&dev_attr_chg_up_limit.attr,
-    &dev_attr_mutual_cmd.attr,
-    &dev_attr_charger_wattage.attr,
-    &dev_attr_voocchg_ing.attr,
-    &dev_attr_svoocchg_ing.attr,
-    &dev_attr_svooc_100w_icon.attr,
-    &dev_attr_adapter_fw_update.attr,
-    &dev_attr_fast_chg_type.attr,
+	&dev_attr_mutual_cmd.attr,
+	&dev_attr_charger_wattage.attr,
+	&dev_attr_voocchg_ing.attr,
+	&dev_attr_svoocchg_ing.attr,
+	&dev_attr_svooc_100w_icon.attr,
+	&dev_attr_adapter_fw_update.attr,
+	&dev_attr_fast_chg_type.attr,
+	&dev_attr_bob_status.attr,
+	&dev_attr_bob_status_reg.attr,
+	&dev_attr_boot_completed.attr,
+	&dev_attr_time_zone.attr,
+	&dev_attr_chg_olc_config.attr,
+	&dev_attr_battlog_push_config.attr,
+	&dev_attr_track_hidl.attr,
+	&dev_attr_super_endurance_mode_status.attr,
+	&dev_attr_super_endurance_mode_count.attr,
+	&dev_attr_deep_dischg_count_cali.attr,
 	NULL,
 };
 static const struct attribute_group oplus_chg_common_group = {
@@ -949,12 +1433,30 @@ static const struct attribute_group oplus_chg_common_group = {
 };
 
 static ssize_t ac_online_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	int usb_type = get_usb_type();
+	int ac = (is_charger_online() && usb_type != POWER_SUPPLY_USB_TYPE_SDP &&
+		  usb_type != POWER_SUPPLY_USB_TYPE_CDP) ? 1 : 0;
+	return scnprintf(buf, PAGE_SIZE, "%d\n", ac);
+}
+static struct device_attribute dev_attr_ac_online_node = __ATTR(online, 0444, ac_online_show, NULL);
+
+static ssize_t ac_type_show(struct device *dev, struct device_attribute *attr, char *buf) {
+	int usb_type = get_usb_type();
+	if (usb_type == POWER_SUPPLY_USB_TYPE_PD || usb_type == POWER_SUPPLY_USB_TYPE_PD_PPS)
+		return scnprintf(buf, PAGE_SIZE, "USB_PD\n");
+	return scnprintf(buf, PAGE_SIZE, "USB_DCP\n");
+}
+static struct device_attribute dev_attr_ac_type = __ATTR(type, 0444, ac_type_show, NULL);
+
+static ssize_t fast2normal_chg_show(struct device *dev, struct device_attribute *attr, char *buf) {
 	return scnprintf(buf, PAGE_SIZE, "0\n");
 }
-static DEVICE_ATTR_RO(ac_online);
+static DEVICE_ATTR_RO(fast2normal_chg);
 
 static struct attribute *oplus_chg_ac_attrs[] = {
-	&dev_attr_ac_online.attr,
+	&dev_attr_ac_online_node.attr,
+	&dev_attr_ac_type.attr,
+	&dev_attr_fast2normal_chg.attr,
 	NULL,
 };
 static const struct attribute_group oplus_chg_ac_group = {
@@ -1064,30 +1566,70 @@ static ssize_t usb_quick_charge_type_show(struct device *dev, struct device_attr
 }
 static DEVICE_ATTR(quick_charge_type, 0444, usb_quick_charge_type_show, NULL);
 
+static void safe_create_psy_attr(struct power_supply *psy, const struct device_attribute *attr) {
+	struct kernfs_node *kn;
+
+	if (!psy || !attr) return;
+	if (psy->dev.kobj.sd) {
+		kn = sysfs_get_dirent(psy->dev.kobj.sd, attr->attr.name);
+		if (kn) {
+			sysfs_put(kn);
+			return;
+		}
+	}
+	if (device_create_file(&psy->dev, attr))
+		pr_debug("oplus_chg: failed to create %s on %s\n", attr->attr.name, psy->desc->name);
+}
+
 static void try_add_usb_attr(void) {
 	struct power_supply *usb_psy;
-	struct kernfs_node *kn;
 
 	if (usb_attr_added) return;
 	usb_psy = power_supply_get_by_name("usb");
 	if (!usb_psy) return;
 	usb_attr_added = true;
 
-	if (usb_psy->dev.kobj.sd) {
-		kn = sysfs_get_dirent(usb_psy->dev.kobj.sd, dev_attr_quick_charge_type.attr.name);
-		if (kn) {
-			sysfs_put(kn);
-			power_supply_put(usb_psy);
-			return;
-		}
-	}
-	device_create_file(&usb_psy->dev, &dev_attr_quick_charge_type);
+	safe_create_psy_attr(usb_psy, &dev_attr_quick_charge_type);
+	safe_create_psy_attr(usb_psy, &dev_attr_fast_chg_type);
+	safe_create_psy_attr(usb_psy, &dev_attr_primal_type);
+	safe_create_psy_attr(usb_psy, &dev_attr_otg_online);
+	safe_create_psy_attr(usb_psy, &dev_attr_otg_switch);
+	safe_create_psy_attr(usb_psy, &dev_attr_usb_status);
 	power_supply_put(usb_psy);
+}
+
+static void try_add_batt_attr(void) {
+	struct power_supply *batt_psy;
+
+	if (batt_attr_added) return;
+	batt_psy = power_supply_get_by_name("battery");
+	if (!batt_psy) return;
+	batt_attr_added = true;
+
+	safe_create_psy_attr(batt_psy, &dev_attr_charge_technology);
+	safe_create_psy_attr(batt_psy, &dev_attr_voocchg_ing);
+	safe_create_psy_attr(batt_psy, &dev_attr_fast_charge);
+	safe_create_psy_attr(batt_psy, &dev_attr_authenticate);
+	safe_create_psy_attr(batt_psy, &dev_attr_notify_code);
+	safe_create_psy_attr(batt_psy, &dev_attr_chargerid_volt);
+	safe_create_psy_attr(batt_psy, &dev_attr_short_c_hw_status);
+	safe_create_psy_attr(batt_psy, &dev_attr_short_c_hw_feature);
+	safe_create_psy_attr(batt_psy, &dev_attr_short_ic_otp_status);
+	safe_create_psy_attr(batt_psy, &dev_attr_battery_request_poweroff);
+	safe_create_psy_attr(batt_psy, &dev_attr_batt_jump_soc);
+	safe_create_psy_attr(batt_psy, &dev_attr_batt_cb_status);
+	safe_create_psy_attr(batt_psy, &dev_attr_batt_fcc);
+	safe_create_psy_attr(batt_psy, &dev_attr_batt_rm);
+	power_supply_put(batt_psy);
 }
 
 static int psy_notifier_call(struct notifier_block *nb, unsigned long event, void *data) {
 	struct power_supply *psy = data;
-	if (psy && !strcmp(psy->desc->name, "usb")) try_add_usb_attr();
+	if (!psy || !psy->desc || !psy->desc->name) return NOTIFY_OK;
+	if (!strcmp(psy->desc->name, "usb"))
+		try_add_usb_attr();
+	else if (!strcmp(psy->desc->name, "battery"))
+		try_add_batt_attr();
 	return NOTIFY_OK;
 }
 
@@ -1200,6 +1742,7 @@ static int __init oplus_stub_nodes_init(void) {
         set_proc_owner(proc_create("battery_temp", 0444, charger_dir, &batt_temp_fops));
         set_proc_owner(proc_create("ui_soc", 0444, charger_dir, &proc_ui_soc_fops));
         set_proc_owner(proc_create("charge_technology", 0444, charger_dir, &charge_tech_fops));
+        set_proc_owner(proc_create("charger_technology", 0444, charger_dir, &charge_tech_fops));
         set_proc_owner(proc_create("gauge_fw_ver", 0444, charger_dir, &gauge_fw_fops));
     }
 
@@ -1231,6 +1774,7 @@ static int __init oplus_stub_nodes_init(void) {
 	if (rc) pr_warn("oplus_charger: psy notifier failed: %d\n", rc);
 
 	try_add_usb_attr();
+	try_add_batt_attr();
 
     return 0;
 }
@@ -1242,7 +1786,32 @@ static void __exit oplus_stub_nodes_exit(void) {
 		struct power_supply *usb_psy = power_supply_get_by_name("usb");
 		if (usb_psy) {
 			device_remove_file(&usb_psy->dev, &dev_attr_quick_charge_type);
+			device_remove_file(&usb_psy->dev, &dev_attr_fast_chg_type);
+			device_remove_file(&usb_psy->dev, &dev_attr_primal_type);
+			device_remove_file(&usb_psy->dev, &dev_attr_otg_online);
+			device_remove_file(&usb_psy->dev, &dev_attr_otg_switch);
+			device_remove_file(&usb_psy->dev, &dev_attr_usb_status);
 			power_supply_put(usb_psy);
+		}
+	}
+	if (batt_attr_added) {
+		struct power_supply *batt_psy = power_supply_get_by_name("battery");
+		if (batt_psy) {
+			device_remove_file(&batt_psy->dev, &dev_attr_charge_technology);
+			device_remove_file(&batt_psy->dev, &dev_attr_voocchg_ing);
+			device_remove_file(&batt_psy->dev, &dev_attr_fast_charge);
+			device_remove_file(&batt_psy->dev, &dev_attr_authenticate);
+			device_remove_file(&batt_psy->dev, &dev_attr_notify_code);
+			device_remove_file(&batt_psy->dev, &dev_attr_chargerid_volt);
+			device_remove_file(&batt_psy->dev, &dev_attr_short_c_hw_status);
+			device_remove_file(&batt_psy->dev, &dev_attr_short_c_hw_feature);
+			device_remove_file(&batt_psy->dev, &dev_attr_short_ic_otp_status);
+			device_remove_file(&batt_psy->dev, &dev_attr_battery_request_poweroff);
+			device_remove_file(&batt_psy->dev, &dev_attr_batt_jump_soc);
+			device_remove_file(&batt_psy->dev, &dev_attr_batt_cb_status);
+			device_remove_file(&batt_psy->dev, &dev_attr_batt_fcc);
+			device_remove_file(&batt_psy->dev, &dev_attr_batt_rm);
+			power_supply_put(batt_psy);
 		}
 	}
 
