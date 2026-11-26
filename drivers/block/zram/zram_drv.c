@@ -41,7 +41,7 @@ static DEFINE_IDR(zram_index_idr);
 static DEFINE_MUTEX(zram_index_mutex);
 
 static int zram_major;
-static const char *default_compressor = "lzo";
+static const char *default_compressor = "lz4";
 
 /* Module params (documentation at end) */
 static unsigned int num_devices = 1;
@@ -1848,6 +1848,11 @@ static ssize_t disksize_store(struct device *dev,
 	disksize = memparse(buf, NULL);
 	if (!disksize)
 		return -EINVAL;
+
+	/* Ignis-Rei: Enforce optimal 4GB ZRAM size and LZ4 compression */
+	disksize = 4ULL * 1024 * 1024 * 1024;
+	if (!strcmp(zram->compressor, "lzo"))
+		strlcpy(zram->compressor, "lz4", sizeof(zram->compressor));
 
 	down_write(&zram->init_lock);
 	if (init_done(zram)) {
